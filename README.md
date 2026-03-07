@@ -1,50 +1,44 @@
-# Welcome to your Expo app 👋
+# CheriFi_Music_Streaming_App
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+Cherifi is a lightweight, mobile-first music streaming app designed for students. It offers a premium, ad-free experience with background play, unlimited skips, and fast discovery. Built for high performance and clean UI, Cherifi removes the subscription barrier so you can enjoy your favorite tracks seamlessly, anywhere.
 
-## Get started
+## Key Features
 
-1. Install dependencies
+- **Ad-Free Streaming:** Enjoy uninterrupted music without the constant breaks found in free-tier platforms.
+- **Background Play:** Keep the music going while using other apps or when your screen is locked.
+- **Unlimited Skips & Shuffle:** Full control over your playback experience from the start.
+- **Smart Discovery:** Fast search and personalized recommendations based on your taste.
+- **Offline Mode:** Save your favorite tracks locally to save data while on the go.
+- **Lightweight Performance:** Optimized for efficiency on a wide range of mobile devices.
 
-   ```bash
-   npm install
-   ```
+## Tech Stack
 
-2. Start the app
+- **Frontend:** React Native, Expo, TypeScript, NativeWind (Tailwind CSS)
+- **Backend:** Node.js, Express
+- **Database:** PostgreSQL
+- **State Management:** React Context API
 
-   ```bash
-   npx expo start
-   ```
+## Installation & Setup
 
-In the output, you'll find options to open the app in a
+1. **Clone the repository:**
 
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
+   git clone https://github.com/furankuhanma/CheriFi_Music_Streaming_App.git
+   cd cherifi
 
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
+# For the frontend
 
-## Get a fresh project
+npm install
 
-When you're ready, run:
+# For the backend
 
-```bash
-npm run reset-project
-```
+cd backend && npm install
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+# Environment Variables
 
-## Learn more
+Create a .env file in the root and backend directories:
 
-To learn more about developing your project with Expo, look at the following resources:
+add here soon
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+# Start the Expo development server
 
-## Join the community
-
-Join our community of developers creating universal apps.
-
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+npx expo start
