@@ -9,6 +9,7 @@ import {
   Modal,
   Share,
   Alert,
+  ActivityIndicator,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { usePlayer, RepeatMode } from "../context/PlayerContext";
@@ -18,12 +19,17 @@ const SCREEN_HEIGHT = Dimensions.get("window").height;
 const DISMISS_THRESHOLD = 120;
 const VELOCITY_THRESHOLD = 0.5;
 
-// ─── Repeat icon helper ───────────────────────────────────────────────────────
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function repeatIcon(mode: RepeatMode): { name: any; color: string } {
   if (mode === "one") return { name: "repeat-outline", color: "#1DB954" };
   if (mode === "all") return { name: "repeat", color: "#1DB954" };
   return { name: "repeat", color: "#B3B3B3" };
+}
+
+function formatTime(ms: number): string {
+  const s = Math.floor(ms / 1000);
+  return `${Math.floor(s / 60)}:${(s % 60).toString().padStart(2, "0")}`;
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -34,7 +40,12 @@ export default function ExpandedPlayer() {
     isExpanded,
     setIsExpanded,
     isPlaying,
-    setIsPlaying,
+    isLoading,
+    togglePlay,
+    playNext,
+    playPrevious,
+    playbackPosition,
+    duration,
     isShuffle,
     toggleShuffle,
     repeatMode,
@@ -48,7 +59,7 @@ export default function ExpandedPlayer() {
 
   const [showContextMenu, setShowContextMenu] = useState(false);
 
-  // ── Slide in / out on isExpanded change ──────────────────────────────────
+  // ── Slide in / out ────────────────────────────────────────────────────────
   useEffect(() => {
     if (isDragging.current) {
       isDragging.current = false;
@@ -100,25 +111,7 @@ export default function ExpandedPlayer() {
     }),
   ).current;
 
-  // ── Action handlers ───────────────────────────────────────────────────────
-  const handleShare = async () => {
-    try {
-      await Share.share({
-        message: `Now listening to ${currentTrack.title} by ${currentTrack.artist}`,
-      });
-    } catch {
-      Alert.alert("Error", "Could not share track");
-    }
-  };
-
-  const handleAddToPlaylist = () =>
-    Alert.alert("Add to Playlist", "Playlist picker coming soon");
-
-  const handleDownload = () =>
-    Alert.alert("Download", "Offline download coming soon");
-
-  const handleLyrics = () => Alert.alert("Lyrics", "Lyrics view coming soon");
-
+  const progress = duration > 0 ? (playbackPosition / duration) * 100 : 0;
   const repeat = repeatIcon(repeatMode);
 
   return (
@@ -221,14 +214,14 @@ export default function ExpandedPlayer() {
           <IconButton name="heart-outline" size={24} color="#B3B3B3" />
         </View>
 
-        {/* Seek Bar */}
+        {/* Progress Bar — visual only, seek disabled until backend ready */}
         <View style={{ width: "100%", marginBottom: 8 }}>
           <View style={{ height: 4, backgroundColor: "#333", borderRadius: 2 }}>
             <View
               style={{
                 height: 4,
                 backgroundColor: "#1DB954",
-                width: "30%",
+                width: `${progress}%`,
                 borderRadius: 2,
               }}
             />
@@ -240,8 +233,12 @@ export default function ExpandedPlayer() {
               marginTop: 6,
             }}
           >
-            <Text style={{ color: "#B3B3B3", fontSize: 11 }}>1:02</Text>
-            <Text style={{ color: "#B3B3B3", fontSize: 11 }}>3:22</Text>
+            <Text style={{ color: "#B3B3B3", fontSize: 11 }}>
+              {formatTime(playbackPosition)}
+            </Text>
+            <Text style={{ color: "#B3B3B3", fontSize: 11 }}>
+              {formatTime(duration)}
+            </Text>
           </View>
         </View>
 
@@ -255,33 +252,56 @@ export default function ExpandedPlayer() {
             marginTop: 16,
           }}
         >
-          {/* Shuffle — green when active */}
           <IconButton
             name="shuffle"
             size={22}
             color={isShuffle ? "#1DB954" : "#B3B3B3"}
             onPress={toggleShuffle}
           />
-          <IconButton name="play-skip-back" size={32} color="white" />
-          <TouchableOpacity
-            onPress={() => setIsPlaying(!isPlaying)}
-            style={{
-              width: 64,
-              height: 64,
-              borderRadius: 32,
-              backgroundColor: "white",
-              alignItems: "center",
-              justifyContent: "center",
-            }}
-          >
-            <Ionicons
-              name={isPlaying ? "pause" : "play"}
-              size={32}
-              color="black"
-            />
-          </TouchableOpacity>
-          <IconButton name="play-skip-forward" size={32} color="white" />
-          {/* Repeat — cycles off → all → one */}
+          <IconButton
+            name="play-skip-back"
+            size={32}
+            color="white"
+            onPress={playPrevious}
+          />
+          {isLoading ? (
+            <View
+              style={{
+                width: 64,
+                height: 64,
+                borderRadius: 32,
+                backgroundColor: "white",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <ActivityIndicator color="black" />
+            </View>
+          ) : (
+            <TouchableOpacity
+              onPress={togglePlay}
+              style={{
+                width: 64,
+                height: 64,
+                borderRadius: 32,
+                backgroundColor: "white",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <Ionicons
+                name={isPlaying ? "pause" : "play"}
+                size={32}
+                color="black"
+              />
+            </TouchableOpacity>
+          )}
+          <IconButton
+            name="play-skip-forward"
+            size={32}
+            color="white"
+            onPress={playNext}
+          />
           <View>
             <IconButton
               name={repeat.name}
@@ -319,25 +339,31 @@ export default function ExpandedPlayer() {
             name="share-outline"
             size={22}
             color="#B3B3B3"
-            onPress={handleShare}
+            onPress={async () => {
+              try {
+                await Share.share({
+                  message: `Now listening to ${currentTrack.title} by ${currentTrack.artist}`,
+                });
+              } catch {}
+            }}
           />
           <IconButton
             name="add-circle-outline"
             size={22}
             color="#B3B3B3"
-            onPress={handleAddToPlaylist}
+            onPress={() => Alert.alert("Add to Playlist", "Coming soon")}
           />
           <IconButton
             name="download-outline"
             size={22}
             color="#B3B3B3"
-            onPress={handleDownload}
+            onPress={() => Alert.alert("Download", "Coming soon")}
           />
           <IconButton
             name="mic-outline"
             size={22}
             color="#B3B3B3"
-            onPress={handleLyrics}
+            onPress={() => Alert.alert("Lyrics", "Coming soon")}
           />
           <IconButton name="list-outline" size={22} color="#B3B3B3" />
         </View>
@@ -412,8 +438,6 @@ export default function ExpandedPlayer() {
     </>
   );
 }
-
-// ─── Reusable Icon Button ─────────────────────────────────────────────────────
 
 function IconButton({
   name,

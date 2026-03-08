@@ -5,28 +5,39 @@ import {
   TouchableOpacity,
   Animated,
   PanResponder,
+  ActivityIndicator,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { usePlayer } from "../context/PlayerContext";
 
 export default function MiniPlayer() {
-  const { currentTrack, isExpanded, setIsExpanded, isPlaying, setIsPlaying } =
-    usePlayer();
+  const {
+    currentTrack,
+    isExpanded,
+    setIsExpanded,
+    isPlaying,
+    isLoading,
+    togglePlay,
+    playNext,
+    playPrevious,
+    playbackPosition,
+    duration,
+  } = usePlayer();
 
-  // Swipe up to expand — uses a plain View so PanResponder isn't
-  // blocked by TouchableOpacity's gesture handler
+  // Swipe up to expand
   const panResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => false,
-      onMoveShouldSetPanResponder: (_, { dy, dx }) => {
-        // Only capture clearly upward vertical swipes
-        return dy < -10 && Math.abs(dy) > Math.abs(dx);
-      },
+      onMoveShouldSetPanResponder: (_, { dy, dx }) =>
+        dy < -10 && Math.abs(dy) > Math.abs(dx),
       onPanResponderRelease: (_, { dy, vy }) => {
         if (dy < -30 || vy < -0.3) setIsExpanded(true);
       },
     }),
   ).current;
+
+  // Progress as a percentage (0–100)
+  const progress = duration > 0 ? (playbackPosition / duration) * 100 : 0;
 
   if (isExpanded) return null;
 
@@ -63,17 +74,34 @@ export default function MiniPlayer() {
           </View>
 
           <IconButton name="heart-outline" size={20} color="#B3B3B3" />
-          <IconButton name="play-skip-back" size={20} color="white" />
           <IconButton
-            name={isPlaying ? "pause" : "play"}
-            size={22}
+            name="play-skip-back"
+            size={20}
             color="white"
-            onPress={() => setIsPlaying(!isPlaying)}
+            onPress={playPrevious}
           />
-          <IconButton name="play-skip-forward" size={20} color="white" />
+
+          {/* Show spinner while loading */}
+          {isLoading ? (
+            <ActivityIndicator color="white" style={{ padding: 8 }} />
+          ) : (
+            <IconButton
+              name={isPlaying ? "pause" : "play"}
+              size={22}
+              color="white"
+              onPress={togglePlay}
+            />
+          )}
+
+          <IconButton
+            name="play-skip-forward"
+            size={20}
+            color="white"
+            onPress={playNext}
+          />
         </View>
 
-        {/* Progress Bar */}
+        {/* Progress Bar — synced to real playback position */}
         <View
           style={{
             height: 2,
@@ -86,7 +114,7 @@ export default function MiniPlayer() {
             style={{
               height: 2,
               backgroundColor: "#1DB954",
-              width: "30%",
+              width: `${progress}%`,
               borderRadius: 1,
             }}
           />
