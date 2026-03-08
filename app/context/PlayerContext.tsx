@@ -193,7 +193,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     }
 
     setIsPlaying(status.isPlaying);
-    setIsLoading(status.isBuffering);
+    setIsLoading(status.isBuffering && !status.isPlaying);
 
     if (status.didJustFinish) {
       if (repeatModeRef.current === "one") {

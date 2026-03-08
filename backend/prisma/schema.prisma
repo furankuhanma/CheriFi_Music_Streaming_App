@@ -88,7 +88,7 @@ model Track {
   id          String   @id @default(uuid())
   title       String
   duration    Int      // duration in seconds
-  audioUrl    String   // local path or future CDN url
+ audioUrl  String  @unique
   coverUrl    String?  // falls back to album cover if null
   artistId    String
   albumId     String?
