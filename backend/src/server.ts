@@ -9,8 +9,8 @@ async function main() {
   await prisma.$connect();
   console.log("✅ Database connected");
 
-  app.listen(PORT, () => {
-    console.log(`🎵 CheriFi API running on http://localhost:${PORT}`);
+  app.listen(PORT, "0.0.0.0", () => {
+    console.log(`🎵 CheriFi API running on http://0.0.0.0:${PORT}`);
     console.log(`   Environment: ${process.env.NODE_ENV ?? "development"}`);
     console.log(`   Health: http://localhost:${PORT}/health`);
   });
