@@ -5,35 +5,81 @@ import {
   TouchableOpacity,
   Animated,
   Dimensions,
+  PanResponder,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { usePlayer } from "../context/PlayerContext";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 const SCREEN_HEIGHT = Dimensions.get("window").height;
+const DISMISS_THRESHOLD = 120;
+const VELOCITY_THRESHOLD = 0.5;
 
 export default function ExpandedPlayer() {
   const { currentTrack, isExpanded, setIsExpanded, isPlaying, setIsPlaying } =
     usePlayer();
   const insets = useSafeAreaInsets();
 
-  const animY = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
-  const animAlbumSize = useRef(new Animated.Value(280)).current;
+  const translateY = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
+  const albumSize = useRef(new Animated.Value(280)).current;
+  const isDragging = useRef(false); // tracks if dismiss came from a swipe
 
+  // Only runs for tap-triggered open/close — swipe handles its own animation
   useEffect(() => {
+    if (isDragging.current) {
+      isDragging.current = false;
+      return;
+    }
+
     Animated.parallel([
-      Animated.spring(animY, {
+      Animated.spring(translateY, {
         toValue: isExpanded ? 0 : SCREEN_HEIGHT,
         useNativeDriver: true,
         bounciness: 0,
+        speed: 20,
       }),
-      Animated.spring(animAlbumSize, {
+      Animated.spring(albumSize, {
         toValue: isExpanded ? 280 : 44,
         useNativeDriver: false,
         bounciness: 4,
       }),
     ]).start();
   }, [isExpanded]);
+
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => false,
+      onMoveShouldSetPanResponder: (_, { dy, dx }) => {
+        return dy > 10 && Math.abs(dy) > Math.abs(dx);
+      },
+      onPanResponderMove: (_, { dy }) => {
+        if (dy > 0) translateY.setValue(dy);
+      },
+      onPanResponderRelease: (_, { dy, vy }) => {
+        if (dy > DISMISS_THRESHOLD || vy > VELOCITY_THRESHOLD) {
+          // Mark as swipe-dismissed so useEffect skips its animation
+          isDragging.current = true;
+          setIsExpanded(false);
+
+          // Continue sliding down from current finger position
+          Animated.spring(translateY, {
+            toValue: SCREEN_HEIGHT,
+            useNativeDriver: true,
+            bounciness: 0,
+            speed: 20,
+            velocity: vy,
+          }).start();
+        } else {
+          // Snap back to fully open
+          Animated.spring(translateY, {
+            toValue: 0,
+            useNativeDriver: true,
+            bounciness: 6,
+          }).start();
+        }
+      },
+    }),
+  ).current;
 
   return (
     <Animated.View
@@ -44,13 +90,26 @@ export default function ExpandedPlayer() {
         right: 0,
         bottom: 0,
         backgroundColor: "#121212",
-        transform: [{ translateY: animY }],
+        transform: [{ translateY }],
         paddingTop: insets.top + 20,
         paddingBottom: insets.bottom + 20,
         paddingHorizontal: 24,
         alignItems: "center",
       }}
+      {...panResponder.panHandlers}
     >
+      {/* Drag Handle */}
+      <View
+        style={{
+          width: 36,
+          height: 4,
+          borderRadius: 2,
+          backgroundColor: "#555",
+          marginBottom: 16,
+          alignSelf: "center",
+        }}
+      />
+
       {/* Header */}
       <View
         style={{
@@ -84,8 +143,8 @@ export default function ExpandedPlayer() {
       <Animated.Image
         source={{ uri: currentTrack.albumArt }}
         style={{
-          width: animAlbumSize,
-          height: animAlbumSize,
+          width: albumSize,
+          height: albumSize,
           borderRadius: 8,
           marginBottom: 32,
         }}
