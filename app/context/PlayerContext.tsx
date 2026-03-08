@@ -14,6 +14,8 @@ import {
   InterruptionModeIOS,
   InterruptionModeAndroid,
 } from "expo-av";
+import { RecommendationsService } from "../services/recommendations.service";
+import { TracksService } from "../services/tracks.service";
 
 export const MINI_PLAYER_HEIGHT = 70;
 export const SCREEN_HEIGHT = Dimensions.get("window").height;
@@ -25,22 +27,35 @@ export type RepeatMode = "off" | "all" | "one";
 export type Track = {
   id: string;
   title: string;
-  artist: string;
-  albumArt: string;
-  audio: any;
+  artist: {
+    id: string;
+    name: string;
+  };
+  album: {
+    id: string;
+    title: string;
+  } | null;
+  coverUrl: string | null;
+  audioUrl: string;
+  duration: number;
+  genre: string | null;
+  playCount: number;
+  isLiked?: boolean;
+  inLibrary?: boolean;
 };
 
 export type PlaybackErrorType =
-  | "load_failed" // generic failure — file missing, bad require, etc.
-  | "network" // URI track failed to fetch over the network
-  | "unsupported" // format the device codec cannot decode
-  | "interrupted" // stream dropped mid-playback after it started
+  | "load_failed"
+  | "network"
+  | "unsupported"
+  | "interrupted"
+  | "queue_failed"
   | null;
 
 type PlayerContextType = {
   isExpanded: boolean;
   setIsExpanded: (value: boolean) => void;
-  currentTrack: Track;
+  currentTrack: Track | null;
   queue: Track[];
   isPlaying: boolean;
   isLoading: boolean;
@@ -49,6 +64,7 @@ type PlayerContextType = {
   duration: number;
   playbackError: PlaybackErrorType;
   retryLoad: () => Promise<void>;
+  refetchQueue: () => Promise<void>;
   play: () => Promise<void>;
   pause: () => Promise<void>;
   togglePlay: () => Promise<void>;
@@ -60,19 +76,10 @@ type PlayerContextType = {
   toggleShuffle: () => void;
   repeatMode: RepeatMode;
   cycleRepeat: () => void;
+  // Like
+  isLiked: boolean;
+  toggleLike: () => Promise<void>;
 };
-
-// ─── Mock Queue ───────────────────────────────────────────────────────────────
-
-const mockQueue: Track[] = [
-  {
-    id: "1",
-    title: "Bang Bang",
-    artist: "Ariana Grande, Jessie J & Nicki Minaj",
-    albumArt: "https://picsum.photos/seed/track1/200",
-    audio: require("../../assets/images/music/0HDdjwpPM3Y.mp3"),
-  },
-];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -121,13 +128,13 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const repeatModeRef = useRef<RepeatMode>("off");
   const isAudioModeReady = useRef(false);
 
-  const lastLoadParamsRef = useRef<{ track: Track; shouldPlay: boolean }>({
-    track: mockQueue[0],
-    shouldPlay: false,
-  });
+  const lastLoadParamsRef = useRef<{
+    track: Track;
+    shouldPlay: boolean;
+  } | null>(null);
 
-  const [queue] = useState<Track[]>(mockQueue);
-  const [currentTrack, setCurrentTrack] = useState<Track>(mockQueue[0]);
+  const [queue, setQueue] = useState<Track[]>([]);
+  const [currentTrack, setCurrentTrack] = useState<Track | null>(null);
   const [isExpanded, setIsExpanded] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -137,16 +144,18 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const [isShuffle, setIsShuffle] = useState(false);
   const [repeatMode, setRepeatMode] = useState<RepeatMode>("off");
   const [playbackError, setPlaybackError] = useState<PlaybackErrorType>(null);
+  const [isLiked, setIsLiked] = useState(false);
 
   useEffect(() => {
     repeatModeRef.current = repeatMode;
   }, [repeatMode]);
 
+  // Seed isLiked from the track whenever currentTrack changes
+  useEffect(() => {
+    setIsLiked(currentTrack?.isLiked ?? false);
+  }, [currentTrack?.id]);
+
   // ── Audio mode ────────────────────────────────────────────────────────────
-  // staysActiveInBackground → music keeps playing when app is backgrounded
-  // playsInSilentModeIOS    → plays even when iPhone mute switch is on
-  // DoNotMix                → OS pauses us automatically during calls/videos,
-  //                           then restores audio focus when they end.
   useEffect(() => {
     Audio.setAudioModeAsync({
       staysActiveInBackground: true,
@@ -205,14 +214,14 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       setPlaybackPosition(0);
       setDuration(0);
 
+      const streamUri = TracksService.streamUrl(track.id);
+
       let attempt = 0;
 
       while (attempt < MAX_RETRIES) {
         try {
           const { sound: newSound } = await Audio.Sound.createAsync(
-            typeof track.audio === "string"
-              ? { uri: track.audio }
-              : track.audio,
+            { uri: streamUri },
             { shouldPlay },
             onPlaybackStatusUpdate,
           );
@@ -224,6 +233,9 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
           setIsPlaying(shouldPlay);
           setIsLoading(false);
           setIsInitialized(true);
+
+          TracksService.recordPlay(track.id);
+
           return;
         } catch (error) {
           attempt += 1;
@@ -254,29 +266,53 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     [onPlaybackStatusUpdate],
   );
 
-  // ── Initialize player on app launch ──────────────────────────────────────
-  // Loads the first track in the queue paused and ready to play.
-  // shouldPlay = false so audio doesn't start automatically on open —
-  // the user taps play when they're ready.
+  // ── Fetch queue ───────────────────────────────────────────────────────────
+  const fetchQueue = useCallback(async () => {
+    try {
+      setIsLoading(true);
+      setPlaybackError(null);
+
+      const tracks = await RecommendationsService.smart(20);
+
+      if (tracks.length === 0) {
+        setIsLoading(false);
+        setIsInitialized(true);
+        return;
+      }
+
+      setQueue(tracks);
+      currentIndexRef.current = 0;
+
+      await wait(100);
+      await loadTrack(tracks[0], false);
+    } catch (error) {
+      console.error("Failed to fetch queue:", error);
+      setPlaybackError("queue_failed");
+      setIsLoading(false);
+      setIsInitialized(true);
+    }
+  }, [loadTrack]);
+
+  const refetchQueue = useCallback(async () => {
+    await fetchQueue();
+  }, [fetchQueue]);
+
   useEffect(() => {
-    if (queue.length === 0) return;
-
-    // Small delay to ensure audio mode is applied before loading
-    const timer = setTimeout(() => {
-      loadTrack(queue[0], false);
-    }, 100);
-
-    return () => clearTimeout(timer);
+    fetchQueue();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // intentionally empty — runs once on mount only
+  }, []);
 
   // ── retryLoad ─────────────────────────────────────────────────────────────
   const retryLoad = useCallback(async () => {
+    if (!lastLoadParamsRef.current) {
+      await fetchQueue();
+      return;
+    }
     const { track, shouldPlay } = lastLoadParamsRef.current;
     await loadTrack(track, shouldPlay);
-  }, [loadTrack]);
+  }, [loadTrack, fetchQueue]);
 
-  // ── playNext ref so status callback can call it without stale closure ─────
+  // ── playNext ──────────────────────────────────────────────────────────────
   const playNextRef = useRef<(() => Promise<void>) | null>(null);
 
   const playNext = useCallback(async () => {
@@ -315,7 +351,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   // ── Controls ──────────────────────────────────────────────────────────────
   const play = async () => {
     if (!soundRef.current) {
-      await loadTrack(currentTrack, true);
+      if (currentTrack) await loadTrack(currentTrack, true);
       return;
     }
     await soundRef.current.playAsync();
@@ -361,6 +397,27 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       prev === "off" ? "all" : prev === "all" ? "one" : "off",
     );
 
+  // ── Like / Unlike ─────────────────────────────────────────────────────────
+  const toggleLike = async () => {
+    if (!currentTrack) return;
+
+    // Optimistic update
+    const prev = isLiked;
+    setIsLiked(!prev);
+
+    try {
+      if (prev) {
+        await TracksService.unlike(currentTrack.id);
+      } else {
+        await TracksService.like(currentTrack.id);
+      }
+    } catch (error) {
+      // Revert on failure
+      console.warn("toggleLike failed, reverting:", error);
+      setIsLiked(prev);
+    }
+  };
+
   return (
     <PlayerContext.Provider
       value={{
@@ -375,6 +432,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         duration,
         playbackError,
         retryLoad,
+        refetchQueue,
         play,
         pause,
         togglePlay,
@@ -386,6 +444,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         toggleShuffle,
         repeatMode,
         cycleRepeat,
+        isLiked,
+        toggleLike,
       }}
     >
       {children}

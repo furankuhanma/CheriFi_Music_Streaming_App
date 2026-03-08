@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.env
+uploads/*.mp3
+uploads/*.m4a
+uploads/*.wav
+uploads/*.flac
+*.log

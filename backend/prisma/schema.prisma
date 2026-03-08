@@ -1,0 +1,175 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Users ────────────────────────────────────────────────────────────────────
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  username     String   @unique
+  displayName  String?
+  avatarUrl    String?
+  passwordHash String?  // null for OAuth-only users
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Relations
+  oauthAccounts OAuthAccount[]
+  refreshTokens RefreshToken[]
+  likes         Like[]
+  library       LibraryTrack[]
+  playlists     Playlist[]
+  playHistory   PlayHistory[]
+
+  @@map("users")
+}
+
+model OAuthAccount {
+  id         String   @id @default(uuid())
+  provider   String   // "google" | "apple"
+  providerId String   // user id from the OAuth provider
+  userId     String
+  createdAt  DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerId])
+  @@map("oauth_accounts")
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  token     String   @unique
+  userId    String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("refresh_tokens")
+}
+
+// ─── Music ────────────────────────────────────────────────────────────────────
+
+model Artist {
+  id        String   @id @default(uuid())
+  name      String
+  bio       String?
+  imageUrl  String?
+  createdAt DateTime @default(now())
+
+  tracks Track[]
+  albums Album[]
+
+  @@map("artists")
+}
+
+model Album {
+  id          String   @id @default(uuid())
+  title       String
+  coverUrl    String?
+  releaseDate DateTime?
+  artistId    String
+  createdAt   DateTime @default(now())
+
+  artist Artist  @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  tracks Track[]
+
+  @@map("albums")
+}
+
+model Track {
+  id          String   @id @default(uuid())
+  title       String
+  duration    Int      // duration in seconds
+  audioUrl    String   // local path or future CDN url
+  coverUrl    String?  // falls back to album cover if null
+  artistId    String
+  albumId     String?
+  genre       String?
+  playCount   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  artist      Artist         @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  album       Album?         @relation(fields: [albumId], references: [id], onDelete: SetNull)
+  likes       Like[]
+  library     LibraryTrack[]
+  playlistTracks PlaylistTrack[]
+  playHistory PlayHistory[]
+
+  @@map("tracks")
+}
+
+// ─── User–Track Relations ─────────────────────────────────────────────────────
+
+model Like {
+  userId    String
+  trackId   String
+  createdAt DateTime @default(now())
+
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  track Track @relation(fields: [trackId], references: [id], onDelete: Cascade)
+
+  @@id([userId, trackId])
+  @@map("likes")
+}
+
+model LibraryTrack {
+  userId    String
+  trackId   String
+  addedAt   DateTime @default(now())
+
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  track Track @relation(fields: [trackId], references: [id], onDelete: Cascade)
+
+  @@id([userId, trackId])
+  @@map("library_tracks")
+}
+
+model Playlist {
+  id          String   @id @default(uuid())
+  title       String
+  description String?
+  coverUrl    String?
+  userId      String
+  isPublic    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user   User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tracks PlaylistTrack[]
+
+  @@map("playlists")
+}
+
+model PlaylistTrack {
+  playlistId String
+  trackId    String
+  position   Int
+  addedAt    DateTime @default(now())
+
+  playlist Playlist @relation(fields: [playlistId], references: [id], onDelete: Cascade)
+  track    Track    @relation(fields: [trackId], references: [id], onDelete: Cascade)
+
+  @@id([playlistId, trackId])
+  @@map("playlist_tracks")
+}
+
+model PlayHistory {
+  id        String   @id @default(uuid())
+  userId    String
+  trackId   String
+  playedAt  DateTime @default(now())
+
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  track Track @relation(fields: [trackId], references: [id], onDelete: Cascade)
+
+  @@map("play_history")
+}

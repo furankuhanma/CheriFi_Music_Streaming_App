@@ -24,8 +24,6 @@ const SCREEN_HEIGHT = Dimensions.get("window").height;
 const DISMISS_THRESHOLD = 120;
 const VELOCITY_THRESHOLD = 0.5;
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
 function repeatIcon(mode: RepeatMode): { name: any; color: string } {
   if (mode === "one") return { name: "repeat-outline", color: "#1DB954" };
   if (mode === "all") return { name: "repeat", color: "#1DB954" };
@@ -57,8 +55,6 @@ function errorMessage(error: PlaybackErrorType): string {
   }
 }
 
-// ─── Component ────────────────────────────────────────────────────────────────
-
 export default function ExpandedPlayer() {
   const {
     currentTrack,
@@ -77,33 +73,23 @@ export default function ExpandedPlayer() {
     toggleShuffle,
     repeatMode,
     cycleRepeat,
+    isLiked,
+    toggleLike,
   } = usePlayer();
 
   const insets = useSafeAreaInsets();
-
-  // translateY uses useNativeDriver: true — runs on the UI thread
   const translateY = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
-
-  // albumSize uses useNativeDriver: false — JS driven (width/height not
-  // supported by the native driver). Must NEVER be animated in the same
-  // Animated.parallel() as translateY or React Native will throw.
   const albumSize = useRef(new Animated.Value(280)).current;
-
   const isDragging = useRef(false);
   const [showContextMenu, setShowContextMenu] = useState(false);
+  const albumArtOpacity = useAlbumArtFade(currentTrack?.id ?? "");
 
-  const albumArtOpacity = useAlbumArtFade(currentTrack.id);
-
-  // ── Slide in / out ────────────────────────────────────────────────────────
-  // translateY and albumSize are animated separately to avoid mixing
-  // useNativeDriver: true and useNativeDriver: false in the same parallel call.
   useEffect(() => {
     if (isDragging.current) {
       isDragging.current = false;
       return;
     }
 
-    // Native driver — translateY only
     Animated.spring(translateY, {
       toValue: isExpanded ? 0 : SCREEN_HEIGHT,
       useNativeDriver: true,
@@ -111,7 +97,6 @@ export default function ExpandedPlayer() {
       speed: 20,
     }).start();
 
-    // JS driver — albumSize only
     Animated.spring(albumSize, {
       toValue: isExpanded ? 280 : 44,
       useNativeDriver: false,
@@ -119,7 +104,6 @@ export default function ExpandedPlayer() {
     }).start();
   }, [isExpanded]);
 
-  // ── Swipe down to dismiss ─────────────────────────────────────────────────
   const panResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => false,
@@ -150,10 +134,11 @@ export default function ExpandedPlayer() {
     }),
   ).current;
 
+  if (!currentTrack) return null;
+
   const progress = duration > 0 ? (playbackPosition / duration) * 100 : 0;
   const repeat = repeatIcon(repeatMode);
 
-  // ── Play button — three states: loading / error / normal ─────────────────
   const renderPlayButton = () => {
     if (isLoading) {
       return (
@@ -239,7 +224,7 @@ export default function ExpandedPlayer() {
         {...panResponder.panHandlers}
         accessibilityViewIsModal={isExpanded}
       >
-        {/* Drag Handle — decorative */}
+        {/* Drag Handle */}
         <View
           style={{
             width: 36,
@@ -293,24 +278,32 @@ export default function ExpandedPlayer() {
           />
         </View>
 
-        {/* Album Art — JS-driven size, native-driven opacity */}
-        <Animated.Image
-          source={{ uri: currentTrack.albumArt }}
+        {/* Album Art */}
+        <Animated.View
           style={{
             width: albumSize,
             height: albumSize,
             borderRadius: 8,
             marginBottom: 32,
-            opacity: playbackError
-              ? albumArtOpacity.interpolate({
-                  inputRange: [0, 1],
-                  outputRange: [0, 0.4],
-                })
-              : albumArtOpacity,
+            overflow: "hidden",
           }}
-          accessibilityLabel={`Album art for ${currentTrack.title}`}
-          accessibilityIgnoresInvertColors
-        />
+        >
+          <Animated.Image
+            source={{ uri: currentTrack.coverUrl ?? undefined }}
+            style={{
+              width: "100%",
+              height: "100%",
+              opacity: playbackError
+                ? albumArtOpacity.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [0, 0.4],
+                  })
+                : albumArtOpacity,
+            }}
+            accessibilityLabel={`Album art for ${currentTrack.title}`}
+            accessibilityIgnoresInvertColors
+          />
+        </Animated.View>
 
         {/* Track Info + Like */}
         <View
@@ -325,7 +318,7 @@ export default function ExpandedPlayer() {
           <View
             style={{ flex: 1 }}
             accessible
-            accessibilityLabel={`${currentTrack.title} by ${currentTrack.artist}`}
+            accessibilityLabel={`${currentTrack.title} by ${currentTrack.artist.name}`}
           >
             <Text
               style={{ color: "white", fontSize: 22, fontWeight: "700" }}
@@ -339,15 +332,22 @@ export default function ExpandedPlayer() {
               numberOfLines={1}
               accessibilityElementsHidden
             >
-              {currentTrack.artist}
+              {currentTrack.artist.name}
             </Text>
           </View>
+
+          {/* ── Like button ── */}
           <IconButton
-            name="heart-outline"
+            name={isLiked ? "heart" : "heart-outline"}
             size={24}
-            color="#B3B3B3"
-            accessibilityLabel="Like track"
-            accessibilityHint="Double tap to like this track"
+            color={isLiked ? "#1DB954" : "#B3B3B3"}
+            onPress={toggleLike}
+            accessibilityLabel={isLiked ? "Unlike track" : "Like track"}
+            accessibilityHint={
+              isLiked
+                ? "Double tap to remove from liked songs"
+                : "Double tap to add to liked songs"
+            }
           />
         </View>
 
@@ -510,7 +510,7 @@ export default function ExpandedPlayer() {
             onPress={async () => {
               try {
                 await Share.share({
-                  message: `Now listening to ${currentTrack.title} by ${currentTrack.artist}`,
+                  message: `Now listening to ${currentTrack.title} by ${currentTrack.artist.name}`,
                 });
               } catch {}
             }}
@@ -551,7 +551,7 @@ export default function ExpandedPlayer() {
         </View>
       </Animated.View>
 
-      {/* ── Context Menu Modal ────────────────────────────────────────────── */}
+      {/* Context Menu Modal */}
       <Modal
         visible={showContextMenu}
         transparent

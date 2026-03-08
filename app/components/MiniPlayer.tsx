@@ -26,9 +26,11 @@ export default function MiniPlayer() {
     playPrevious,
     playbackPosition,
     duration,
+    isLiked,
+    toggleLike,
   } = usePlayer();
 
-  const albumArtOpacity = useAlbumArtFade(currentTrack.id);
+  const albumArtOpacity = useAlbumArtFade(currentTrack?.id ?? "");
 
   const panResponder = useRef(
     PanResponder.create({
@@ -43,7 +45,7 @@ export default function MiniPlayer() {
 
   const progress = duration > 0 ? (playbackPosition / duration) * 100 : 0;
 
-  if (isExpanded) return null;
+  if (!currentTrack || isExpanded) return null;
 
   return (
     <View
@@ -60,7 +62,7 @@ export default function MiniPlayer() {
         activeOpacity={0.9}
         style={{ paddingHorizontal: 12, paddingVertical: 10 }}
         accessibilityRole="button"
-        accessibilityLabel={`Now playing: ${currentTrack.title} by ${currentTrack.artist}`}
+        accessibilityLabel={`Now playing: ${currentTrack.title} by ${currentTrack.artist.name}`}
         accessibilityHint="Double tap to open full player"
       >
         {/* Row: album art + info + controls */}
@@ -69,7 +71,7 @@ export default function MiniPlayer() {
           accessible={false}
         >
           <Animated.Image
-            source={{ uri: currentTrack.albumArt }}
+            source={{ uri: currentTrack.coverUrl ?? undefined }}
             style={{
               width: 44,
               height: 44,
@@ -81,11 +83,11 @@ export default function MiniPlayer() {
             accessibilityIgnoresInvertColors
           />
 
-          {/* Track info — read as a single unit */}
+          {/* Track info */}
           <View
             style={{ flex: 1 }}
             accessible
-            accessibilityLabel={`${currentTrack.title}, ${currentTrack.artist}`}
+            accessibilityLabel={`${currentTrack.title}, ${currentTrack.artist.name}`}
           >
             <Text
               style={{ color: "white", fontSize: 13, fontWeight: "600" }}
@@ -99,17 +101,33 @@ export default function MiniPlayer() {
               numberOfLines={1}
               accessibilityElementsHidden
             >
-              {currentTrack.artist}
+              {currentTrack.artist.name}
             </Text>
           </View>
 
-          <IconButton
-            name="heart-outline"
-            size={20}
-            color="#B3B3B3"
-            accessibilityLabel="Like track"
-            accessibilityHint="Double tap to like this track"
-          />
+          {/* Like button */}
+          <TouchableOpacity
+            onPress={(e) => {
+              e.stopPropagation();
+              toggleLike();
+            }}
+            style={{ padding: 8 }}
+            accessibilityRole="button"
+            accessibilityLabel={isLiked ? "Unlike track" : "Like track"}
+            accessibilityHint={
+              isLiked
+                ? "Double tap to remove from liked songs"
+                : "Double tap to add to liked songs"
+            }
+            hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
+          >
+            <Ionicons
+              name={isLiked ? "heart" : "heart-outline"}
+              size={20}
+              color={isLiked ? "#1DB954" : "#B3B3B3"}
+            />
+          </TouchableOpacity>
+
           <IconButton
             name="play-skip-back"
             size={20}
@@ -164,7 +182,7 @@ export default function MiniPlayer() {
           />
         </View>
 
-        {/* Progress bar — decorative, no screen reader value */}
+        {/* Progress bar */}
         <View
           style={{
             height: 2,
