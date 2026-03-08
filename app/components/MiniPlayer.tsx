@@ -9,6 +9,7 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { usePlayer } from "../context/PlayerContext";
+import { useAlbumArtFade } from "../hooks/useAlbumArtFade";
 
 export default function MiniPlayer() {
   const {
@@ -17,6 +18,9 @@ export default function MiniPlayer() {
     setIsExpanded,
     isPlaying,
     isLoading,
+    isInitialized,
+    playbackError,
+    retryLoad,
     togglePlay,
     playNext,
     playPrevious,
@@ -24,7 +28,8 @@ export default function MiniPlayer() {
     duration,
   } = usePlayer();
 
-  // Swipe up to expand
+  const albumArtOpacity = useAlbumArtFade(currentTrack.id);
+
   const panResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => false,
@@ -36,7 +41,6 @@ export default function MiniPlayer() {
     }),
   ).current;
 
-  // Progress as a percentage (0–100)
   const progress = duration > 0 ? (playbackPosition / duration) * 100 : 0;
 
   if (isExpanded) return null;
@@ -49,47 +53,104 @@ export default function MiniPlayer() {
         borderTopWidth: 1,
         borderTopColor: "#282828",
       }}
+      accessible={false}
     >
       <TouchableOpacity
         onPress={() => setIsExpanded(true)}
         activeOpacity={0.9}
         style={{ paddingHorizontal: 12, paddingVertical: 10 }}
+        accessibilityRole="button"
+        accessibilityLabel={`Now playing: ${currentTrack.title} by ${currentTrack.artist}`}
+        accessibilityHint="Double tap to open full player"
       >
         {/* Row: album art + info + controls */}
-        <View style={{ flexDirection: "row", alignItems: "center" }}>
+        <View
+          style={{ flexDirection: "row", alignItems: "center" }}
+          accessible={false}
+        >
           <Animated.Image
             source={{ uri: currentTrack.albumArt }}
-            style={{ width: 44, height: 44, borderRadius: 4, marginRight: 10 }}
+            style={{
+              width: 44,
+              height: 44,
+              borderRadius: 4,
+              marginRight: 10,
+              opacity: albumArtOpacity,
+            }}
+            accessibilityLabel={`Album art for ${currentTrack.title}`}
+            accessibilityIgnoresInvertColors
           />
-          <View style={{ flex: 1 }}>
+
+          {/* Track info — read as a single unit */}
+          <View
+            style={{ flex: 1 }}
+            accessible
+            accessibilityLabel={`${currentTrack.title}, ${currentTrack.artist}`}
+          >
             <Text
               style={{ color: "white", fontSize: 13, fontWeight: "600" }}
               numberOfLines={1}
+              accessibilityElementsHidden
             >
               {currentTrack.title}
             </Text>
-            <Text style={{ color: "#B3B3B3", fontSize: 11 }} numberOfLines={1}>
+            <Text
+              style={{ color: "#B3B3B3", fontSize: 11 }}
+              numberOfLines={1}
+              accessibilityElementsHidden
+            >
               {currentTrack.artist}
             </Text>
           </View>
 
-          <IconButton name="heart-outline" size={20} color="#B3B3B3" />
+          <IconButton
+            name="heart-outline"
+            size={20}
+            color="#B3B3B3"
+            accessibilityLabel="Like track"
+            accessibilityHint="Double tap to like this track"
+          />
           <IconButton
             name="play-skip-back"
             size={20}
             color="white"
             onPress={playPrevious}
+            accessibilityLabel="Previous track"
+            accessibilityHint="Double tap to go to previous track"
           />
 
-          {/* Show spinner while loading */}
           {isLoading ? (
-            <ActivityIndicator color="white" style={{ padding: 8 }} />
+            <ActivityIndicator
+              color="white"
+              style={{ padding: 8 }}
+              accessibilityLabel="Loading track"
+            />
+          ) : playbackError ? (
+            <TouchableOpacity
+              onPress={(e) => {
+                e.stopPropagation();
+                retryLoad();
+              }}
+              style={{ padding: 8 }}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              accessibilityRole="button"
+              accessibilityLabel="Playback error"
+              accessibilityHint="Double tap to retry loading the track"
+            >
+              <Ionicons name="warning-outline" size={22} color="#FF4444" />
+            </TouchableOpacity>
           ) : (
             <IconButton
               name={isPlaying ? "pause" : "play"}
               size={22}
               color="white"
               onPress={togglePlay}
+              accessibilityLabel={isPlaying ? "Pause" : "Play"}
+              accessibilityHint={
+                isPlaying
+                  ? "Double tap to pause playback"
+                  : "Double tap to start playback"
+              }
             />
           )}
 
@@ -98,10 +159,12 @@ export default function MiniPlayer() {
             size={20}
             color="white"
             onPress={playNext}
+            accessibilityLabel="Next track"
+            accessibilityHint="Double tap to skip to next track"
           />
         </View>
 
-        {/* Progress Bar — synced to real playback position */}
+        {/* Progress bar — decorative, no screen reader value */}
         <View
           style={{
             height: 2,
@@ -109,11 +172,14 @@ export default function MiniPlayer() {
             marginTop: 8,
             borderRadius: 1,
           }}
+          accessible={false}
+          accessibilityElementsHidden
+          importantForAccessibility="no-hide-descendants"
         >
           <View
             style={{
               height: 2,
-              backgroundColor: "#1DB954",
+              backgroundColor: playbackError ? "#FF4444" : "#1DB954",
               width: `${progress}%`,
               borderRadius: 1,
             }}
@@ -129,14 +195,25 @@ function IconButton({
   size,
   color,
   onPress,
+  accessibilityLabel,
+  accessibilityHint,
 }: {
   name: any;
   size: number;
   color: string;
   onPress?: () => void;
+  accessibilityLabel?: string;
+  accessibilityHint?: string;
 }) {
   return (
-    <TouchableOpacity onPress={onPress} style={{ padding: 8 }}>
+    <TouchableOpacity
+      onPress={onPress}
+      style={{ padding: 8 }}
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel}
+      accessibilityHint={accessibilityHint}
+      hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
+    >
       <Ionicons name={name} size={size} color={color} />
     </TouchableOpacity>
   );

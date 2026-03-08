@@ -12,8 +12,13 @@ import {
   ActivityIndicator,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { usePlayer, RepeatMode } from "../context/PlayerContext";
+import {
+  usePlayer,
+  RepeatMode,
+  PlaybackErrorType,
+} from "../context/PlayerContext";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useAlbumArtFade } from "../hooks/useAlbumArtFade";
 
 const SCREEN_HEIGHT = Dimensions.get("window").height;
 const DISMISS_THRESHOLD = 120;
@@ -27,9 +32,29 @@ function repeatIcon(mode: RepeatMode): { name: any; color: string } {
   return { name: "repeat", color: "#B3B3B3" };
 }
 
+function repeatLabel(mode: RepeatMode): string {
+  if (mode === "one") return "Repeat: one track";
+  if (mode === "all") return "Repeat: all tracks";
+  return "Repeat: off";
+}
+
 function formatTime(ms: number): string {
   const s = Math.floor(ms / 1000);
   return `${Math.floor(s / 60)}:${(s % 60).toString().padStart(2, "0")}`;
+}
+
+function errorMessage(error: PlaybackErrorType): string {
+  switch (error) {
+    case "network":
+      return "No connection. Check your network and try again.";
+    case "unsupported":
+      return "This track format isn't supported on your device.";
+    case "interrupted":
+      return "Playback was interrupted. Tap to resume.";
+    case "load_failed":
+    default:
+      return "Couldn't load this track. Tap to retry.";
+  }
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -41,6 +66,8 @@ export default function ExpandedPlayer() {
     setIsExpanded,
     isPlaying,
     isLoading,
+    playbackError,
+    retryLoad,
     togglePlay,
     playNext,
     playPrevious,
@@ -53,31 +80,43 @@ export default function ExpandedPlayer() {
   } = usePlayer();
 
   const insets = useSafeAreaInsets();
-  const translateY = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
-  const albumSize = useRef(new Animated.Value(280)).current;
-  const isDragging = useRef(false);
 
+  // translateY uses useNativeDriver: true — runs on the UI thread
+  const translateY = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
+
+  // albumSize uses useNativeDriver: false — JS driven (width/height not
+  // supported by the native driver). Must NEVER be animated in the same
+  // Animated.parallel() as translateY or React Native will throw.
+  const albumSize = useRef(new Animated.Value(280)).current;
+
+  const isDragging = useRef(false);
   const [showContextMenu, setShowContextMenu] = useState(false);
 
+  const albumArtOpacity = useAlbumArtFade(currentTrack.id);
+
   // ── Slide in / out ────────────────────────────────────────────────────────
+  // translateY and albumSize are animated separately to avoid mixing
+  // useNativeDriver: true and useNativeDriver: false in the same parallel call.
   useEffect(() => {
     if (isDragging.current) {
       isDragging.current = false;
       return;
     }
-    Animated.parallel([
-      Animated.spring(translateY, {
-        toValue: isExpanded ? 0 : SCREEN_HEIGHT,
-        useNativeDriver: true,
-        bounciness: 0,
-        speed: 20,
-      }),
-      Animated.spring(albumSize, {
-        toValue: isExpanded ? 280 : 44,
-        useNativeDriver: false,
-        bounciness: 4,
-      }),
-    ]).start();
+
+    // Native driver — translateY only
+    Animated.spring(translateY, {
+      toValue: isExpanded ? 0 : SCREEN_HEIGHT,
+      useNativeDriver: true,
+      bounciness: 0,
+      speed: 20,
+    }).start();
+
+    // JS driver — albumSize only
+    Animated.spring(albumSize, {
+      toValue: isExpanded ? 280 : 44,
+      useNativeDriver: false,
+      bounciness: 4,
+    }).start();
   }, [isExpanded]);
 
   // ── Swipe down to dismiss ─────────────────────────────────────────────────
@@ -114,6 +153,73 @@ export default function ExpandedPlayer() {
   const progress = duration > 0 ? (playbackPosition / duration) * 100 : 0;
   const repeat = repeatIcon(repeatMode);
 
+  // ── Play button — three states: loading / error / normal ─────────────────
+  const renderPlayButton = () => {
+    if (isLoading) {
+      return (
+        <View
+          style={{
+            width: 64,
+            height: 64,
+            borderRadius: 32,
+            backgroundColor: "white",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+          accessible
+          accessibilityLabel="Loading track"
+          accessibilityRole="progressbar"
+        >
+          <ActivityIndicator color="black" />
+        </View>
+      );
+    }
+
+    if (playbackError) {
+      return (
+        <TouchableOpacity
+          onPress={retryLoad}
+          style={{
+            width: 64,
+            height: 64,
+            borderRadius: 32,
+            backgroundColor: "#FF4444",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+          accessibilityRole="button"
+          accessibilityLabel="Retry loading track"
+          accessibilityHint="Double tap to try loading the track again"
+        >
+          <Ionicons name="refresh" size={28} color="white" />
+        </TouchableOpacity>
+      );
+    }
+
+    return (
+      <TouchableOpacity
+        onPress={togglePlay}
+        style={{
+          width: 64,
+          height: 64,
+          borderRadius: 32,
+          backgroundColor: "white",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+        accessibilityRole="button"
+        accessibilityLabel={isPlaying ? "Pause" : "Play"}
+        accessibilityHint={
+          isPlaying
+            ? "Double tap to pause playback"
+            : "Double tap to start playback"
+        }
+      >
+        <Ionicons name={isPlaying ? "pause" : "play"} size={32} color="black" />
+      </TouchableOpacity>
+    );
+  };
+
   return (
     <>
       <Animated.View
@@ -131,8 +237,9 @@ export default function ExpandedPlayer() {
           alignItems: "center",
         }}
         {...panResponder.panHandlers}
+        accessibilityViewIsModal={isExpanded}
       >
-        {/* Drag Handle */}
+        {/* Drag Handle — decorative */}
         <View
           style={{
             width: 36,
@@ -141,6 +248,9 @@ export default function ExpandedPlayer() {
             backgroundColor: "#555",
             marginBottom: 16,
           }}
+          accessible={false}
+          accessibilityElementsHidden
+          importantForAccessibility="no"
         />
 
         {/* Header */}
@@ -151,12 +261,15 @@ export default function ExpandedPlayer() {
             width: "100%",
             marginBottom: 32,
           }}
+          accessible={false}
         >
           <IconButton
             name="chevron-down"
             size={28}
             color="white"
             onPress={() => setIsExpanded(false)}
+            accessibilityLabel="Close player"
+            accessibilityHint="Double tap to collapse the player"
           />
           <Text
             style={{
@@ -166,6 +279,7 @@ export default function ExpandedPlayer() {
               fontWeight: "600",
               fontSize: 14,
             }}
+            accessibilityRole="header"
           >
             Now Playing
           </Text>
@@ -174,10 +288,12 @@ export default function ExpandedPlayer() {
             size={24}
             color="white"
             onPress={() => setShowContextMenu(true)}
+            accessibilityLabel="More options"
+            accessibilityHint="Double tap to open track options menu"
           />
         </View>
 
-        {/* Album Art */}
+        {/* Album Art — JS-driven size, native-driven opacity */}
         <Animated.Image
           source={{ uri: currentTrack.albumArt }}
           style={{
@@ -185,7 +301,15 @@ export default function ExpandedPlayer() {
             height: albumSize,
             borderRadius: 8,
             marginBottom: 32,
+            opacity: playbackError
+              ? albumArtOpacity.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [0, 0.4],
+                })
+              : albumArtOpacity,
           }}
+          accessibilityLabel={`Album art for ${currentTrack.title}`}
+          accessibilityIgnoresInvertColors
         />
 
         {/* Track Info + Like */}
@@ -196,31 +320,91 @@ export default function ExpandedPlayer() {
             width: "100%",
             marginBottom: 24,
           }}
+          accessible={false}
         >
-          <View style={{ flex: 1 }}>
+          <View
+            style={{ flex: 1 }}
+            accessible
+            accessibilityLabel={`${currentTrack.title} by ${currentTrack.artist}`}
+          >
             <Text
               style={{ color: "white", fontSize: 22, fontWeight: "700" }}
               numberOfLines={1}
+              accessibilityElementsHidden
             >
               {currentTrack.title}
             </Text>
             <Text
               style={{ color: "#B3B3B3", fontSize: 15, marginTop: 4 }}
               numberOfLines={1}
+              accessibilityElementsHidden
             >
               {currentTrack.artist}
             </Text>
           </View>
-          <IconButton name="heart-outline" size={24} color="#B3B3B3" />
+          <IconButton
+            name="heart-outline"
+            size={24}
+            color="#B3B3B3"
+            accessibilityLabel="Like track"
+            accessibilityHint="Double tap to like this track"
+          />
         </View>
 
-        {/* Progress Bar — visual only, seek disabled until backend ready */}
-        <View style={{ width: "100%", marginBottom: 8 }}>
-          <View style={{ height: 4, backgroundColor: "#333", borderRadius: 2 }}>
+        {/* Error banner */}
+        {playbackError && (
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              backgroundColor: "#2A1515",
+              borderRadius: 8,
+              paddingHorizontal: 12,
+              paddingVertical: 8,
+              marginBottom: 16,
+              width: "100%",
+            }}
+            accessible
+            accessibilityRole="alert"
+            accessibilityLabel={errorMessage(playbackError)}
+          >
+            <Ionicons
+              name="warning-outline"
+              size={16}
+              color="#FF4444"
+              style={{ marginRight: 8 }}
+              accessibilityElementsHidden
+            />
+            <Text
+              style={{ color: "#FF4444", fontSize: 13, flex: 1 }}
+              accessibilityElementsHidden
+            >
+              {errorMessage(playbackError)}
+            </Text>
+          </View>
+        )}
+
+        {/* Progress Bar */}
+        <View
+          style={{ width: "100%", marginBottom: 8 }}
+          accessible
+          accessibilityLabel={`Playback position: ${formatTime(playbackPosition)} of ${formatTime(duration)}`}
+          accessibilityRole="progressbar"
+          accessibilityValue={{
+            min: 0,
+            max: duration,
+            now: playbackPosition,
+          }}
+        >
+          <View
+            style={{ height: 4, backgroundColor: "#333", borderRadius: 2 }}
+            accessibilityElementsHidden
+            importantForAccessibility="no-hide-descendants"
+          >
             <View
               style={{
                 height: 4,
-                backgroundColor: "#1DB954",
+                backgroundColor: playbackError ? "#FF4444" : "#1DB954",
                 width: `${progress}%`,
                 borderRadius: 2,
               }}
@@ -232,6 +416,8 @@ export default function ExpandedPlayer() {
               justifyContent: "space-between",
               marginTop: 6,
             }}
+            accessibilityElementsHidden
+            importantForAccessibility="no-hide-descendants"
           >
             <Text style={{ color: "#B3B3B3", fontSize: 11 }}>
               {formatTime(playbackPosition)}
@@ -251,63 +437,43 @@ export default function ExpandedPlayer() {
             width: "100%",
             marginTop: 16,
           }}
+          accessible={false}
         >
           <IconButton
             name="shuffle"
             size={22}
             color={isShuffle ? "#1DB954" : "#B3B3B3"}
             onPress={toggleShuffle}
+            accessibilityLabel={isShuffle ? "Shuffle: on" : "Shuffle: off"}
+            accessibilityHint="Double tap to toggle shuffle"
           />
           <IconButton
             name="play-skip-back"
             size={32}
             color="white"
             onPress={playPrevious}
+            accessibilityLabel="Previous track"
+            accessibilityHint="Double tap to go to previous track or restart current track"
           />
-          {isLoading ? (
-            <View
-              style={{
-                width: 64,
-                height: 64,
-                borderRadius: 32,
-                backgroundColor: "white",
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
-              <ActivityIndicator color="black" />
-            </View>
-          ) : (
-            <TouchableOpacity
-              onPress={togglePlay}
-              style={{
-                width: 64,
-                height: 64,
-                borderRadius: 32,
-                backgroundColor: "white",
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
-              <Ionicons
-                name={isPlaying ? "pause" : "play"}
-                size={32}
-                color="black"
-              />
-            </TouchableOpacity>
-          )}
+
+          {renderPlayButton()}
+
           <IconButton
             name="play-skip-forward"
             size={32}
             color="white"
             onPress={playNext}
+            accessibilityLabel="Next track"
+            accessibilityHint="Double tap to skip to next track"
           />
-          <View>
+          <View accessible={false}>
             <IconButton
               name={repeat.name}
               size={22}
               color={repeat.color}
               onPress={cycleRepeat}
+              accessibilityLabel={repeatLabel(repeatMode)}
+              accessibilityHint="Double tap to cycle repeat mode"
             />
             {repeatMode === "one" && (
               <Text
@@ -319,6 +485,7 @@ export default function ExpandedPlayer() {
                   fontSize: 8,
                   fontWeight: "700",
                 }}
+                accessibilityElementsHidden
               >
                 1
               </Text>
@@ -334,6 +501,7 @@ export default function ExpandedPlayer() {
             width: "100%",
             marginTop: 32,
           }}
+          accessible={false}
         >
           <IconButton
             name="share-outline"
@@ -346,26 +514,40 @@ export default function ExpandedPlayer() {
                 });
               } catch {}
             }}
+            accessibilityLabel="Share track"
+            accessibilityHint="Double tap to share this track"
           />
           <IconButton
             name="add-circle-outline"
             size={22}
             color="#B3B3B3"
             onPress={() => Alert.alert("Add to Playlist", "Coming soon")}
+            accessibilityLabel="Add to playlist"
+            accessibilityHint="Double tap to add this track to a playlist"
           />
           <IconButton
             name="download-outline"
             size={22}
             color="#B3B3B3"
             onPress={() => Alert.alert("Download", "Coming soon")}
+            accessibilityLabel="Download track"
+            accessibilityHint="Double tap to download this track for offline listening"
           />
           <IconButton
             name="mic-outline"
             size={22}
             color="#B3B3B3"
             onPress={() => Alert.alert("Lyrics", "Coming soon")}
+            accessibilityLabel="Show lyrics"
+            accessibilityHint="Double tap to view track lyrics"
           />
-          <IconButton name="list-outline" size={22} color="#B3B3B3" />
+          <IconButton
+            name="list-outline"
+            size={22}
+            color="#B3B3B3"
+            accessibilityLabel="Show queue"
+            accessibilityHint="Double tap to view the play queue"
+          />
         </View>
       </Animated.View>
 
@@ -375,10 +557,13 @@ export default function ExpandedPlayer() {
         transparent
         animationType="slide"
         onRequestClose={() => setShowContextMenu(false)}
+        accessibilityViewIsModal
       >
         <TouchableOpacity
           style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.5)" }}
           onPress={() => setShowContextMenu(false)}
+          accessibilityLabel="Close menu"
+          accessibilityHint="Double tap to dismiss the options menu"
         />
         <View
           style={{
@@ -397,6 +582,7 @@ export default function ExpandedPlayer() {
               marginBottom: 16,
               textAlign: "center",
             }}
+            accessibilityRole="header"
           >
             {currentTrack.title}
           </Text>
@@ -417,19 +603,29 @@ export default function ExpandedPlayer() {
                 alignItems: "center",
                 paddingVertical: 14,
               }}
+              accessibilityRole="button"
+              accessibilityLabel={label}
             >
               <Ionicons
                 name={icon as any}
                 size={22}
                 color="white"
                 style={{ marginRight: 16 }}
+                accessibilityElementsHidden
               />
-              <Text style={{ color: "white", fontSize: 15 }}>{label}</Text>
+              <Text
+                style={{ color: "white", fontSize: 15 }}
+                accessibilityElementsHidden
+              >
+                {label}
+              </Text>
             </TouchableOpacity>
           ))}
           <TouchableOpacity
             onPress={() => setShowContextMenu(false)}
             style={{ marginTop: 8, alignItems: "center", paddingVertical: 12 }}
+            accessibilityRole="button"
+            accessibilityLabel="Cancel"
           >
             <Text style={{ color: "#B3B3B3", fontSize: 14 }}>Cancel</Text>
           </TouchableOpacity>
@@ -444,14 +640,25 @@ function IconButton({
   size,
   color,
   onPress,
+  accessibilityLabel,
+  accessibilityHint,
 }: {
   name: any;
   size: number;
   color: string;
   onPress?: () => void;
+  accessibilityLabel?: string;
+  accessibilityHint?: string;
 }) {
   return (
-    <TouchableOpacity onPress={onPress} style={{ padding: 8 }}>
+    <TouchableOpacity
+      onPress={onPress}
+      style={{ padding: 8 }}
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel}
+      accessibilityHint={accessibilityHint}
+      hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
+    >
       <Ionicons name={name} size={size} color={color} />
     </TouchableOpacity>
   );

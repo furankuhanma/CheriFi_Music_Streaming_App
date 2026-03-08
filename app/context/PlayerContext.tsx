@@ -8,7 +8,12 @@ import React, {
   ReactNode,
 } from "react";
 import { Dimensions } from "react-native";
-import { Audio, AVPlaybackStatus } from "expo-av";
+import {
+  Audio,
+  AVPlaybackStatus,
+  InterruptionModeIOS,
+  InterruptionModeAndroid,
+} from "expo-av";
 
 export const MINI_PLAYER_HEIGHT = 70;
 export const SCREEN_HEIGHT = Dimensions.get("window").height;
@@ -25,6 +30,13 @@ export type Track = {
   audio: any;
 };
 
+export type PlaybackErrorType =
+  | "load_failed" // generic failure — file missing, bad require, etc.
+  | "network" // URI track failed to fetch over the network
+  | "unsupported" // format the device codec cannot decode
+  | "interrupted" // stream dropped mid-playback after it started
+  | null;
+
 type PlayerContextType = {
   isExpanded: boolean;
   setIsExpanded: (value: boolean) => void;
@@ -32,8 +44,11 @@ type PlayerContextType = {
   queue: Track[];
   isPlaying: boolean;
   isLoading: boolean;
+  isInitialized: boolean;
   playbackPosition: number;
   duration: number;
+  playbackError: PlaybackErrorType;
+  retryLoad: () => Promise<void>;
   play: () => Promise<void>;
   pause: () => Promise<void>;
   togglePlay: () => Promise<void>;
@@ -59,6 +74,42 @@ const mockQueue: Track[] = [
   },
 ];
 
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+const MAX_RETRIES = 3;
+const RETRY_DELAY_MS = 1000;
+
+const wait = (ms: number) =>
+  new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+const classifyError = (error: unknown): PlaybackErrorType => {
+  const msg =
+    error instanceof Error
+      ? error.message.toLowerCase()
+      : String(error).toLowerCase();
+
+  if (
+    msg.includes("unsupported") ||
+    msg.includes("codec") ||
+    msg.includes("format") ||
+    msg.includes("invalid")
+  ) {
+    return "unsupported";
+  }
+
+  if (
+    msg.includes("network") ||
+    msg.includes("fetch") ||
+    msg.includes("econnrefused") ||
+    msg.includes("timeout") ||
+    msg.includes("could not connect")
+  ) {
+    return "network";
+  }
+
+  return "load_failed";
+};
+
 // ─── Context ──────────────────────────────────────────────────────────────────
 
 const PlayerContext = createContext<PlayerContextType | null>(null);
@@ -68,37 +119,62 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const currentIndexRef = useRef(0);
   const isSeekingRef = useRef(false);
   const repeatModeRef = useRef<RepeatMode>("off");
+  const isAudioModeReady = useRef(false);
 
-  const [queue, setQueue] = useState<Track[]>(mockQueue);
+  const lastLoadParamsRef = useRef<{ track: Track; shouldPlay: boolean }>({
+    track: mockQueue[0],
+    shouldPlay: false,
+  });
+
+  const [queue] = useState<Track[]>(mockQueue);
   const [currentTrack, setCurrentTrack] = useState<Track>(mockQueue[0]);
   const [isExpanded, setIsExpanded] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [isInitialized, setIsInitialized] = useState(false);
   const [playbackPosition, setPlaybackPosition] = useState(0);
   const [duration, setDuration] = useState(0);
   const [isShuffle, setIsShuffle] = useState(false);
   const [repeatMode, setRepeatMode] = useState<RepeatMode>("off");
+  const [playbackError, setPlaybackError] = useState<PlaybackErrorType>(null);
 
-  // Keep ref in sync with state so callbacks always have latest value
   useEffect(() => {
     repeatModeRef.current = repeatMode;
   }, [repeatMode]);
 
-  // ── Configure audio mode ──────────────────────────────────────────────────
+  // ── Audio mode ────────────────────────────────────────────────────────────
+  // staysActiveInBackground → music keeps playing when app is backgrounded
+  // playsInSilentModeIOS    → plays even when iPhone mute switch is on
+  // DoNotMix                → OS pauses us automatically during calls/videos,
+  //                           then restores audio focus when they end.
   useEffect(() => {
     Audio.setAudioModeAsync({
       staysActiveInBackground: true,
       playsInSilentModeIOS: true,
+      interruptionModeIOS: InterruptionModeIOS.DoNotMix,
+      interruptionModeAndroid: InterruptionModeAndroid.DoNotMix,
+      shouldDuckAndroid: true,
+      playThroughEarpieceAndroid: false,
+    }).then(() => {
+      isAudioModeReady.current = true;
     });
+
     return () => {
       soundRef.current?.unloadAsync();
     };
   }, []);
 
   // ── Playback status callback ──────────────────────────────────────────────
-  // Uses refs instead of state to avoid stale closures
   const onPlaybackStatusUpdate = useCallback((status: AVPlaybackStatus) => {
-    if (!status.isLoaded) return;
+    if (!status.isLoaded) {
+      if (status.error) {
+        console.error("Stream interrupted mid-playback:", status.error);
+        setPlaybackError("interrupted");
+        setIsPlaying(false);
+        setIsLoading(false);
+      }
+      return;
+    }
 
     if (!isSeekingRef.current) {
       setPlaybackPosition(status.positionMillis);
@@ -119,37 +195,88 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  // ── Load track ────────────────────────────────────────────────────────────
+  // ── Load track (with retry) ───────────────────────────────────────────────
   const loadTrack = useCallback(
     async (track: Track, shouldPlay = true) => {
-      try {
-        setIsLoading(true);
-        setCurrentTrack(track);
-        setPlaybackPosition(0);
-        setDuration(0);
+      lastLoadParamsRef.current = { track, shouldPlay };
+      setPlaybackError(null);
+      setIsLoading(true);
+      setCurrentTrack(track);
+      setPlaybackPosition(0);
+      setDuration(0);
 
-        // Create new sound first, then unload old one — faster transition
-        const { sound: newSound } = await Audio.Sound.createAsync(
-          typeof track.audio === "string" ? { uri: track.audio } : track.audio,
-          { shouldPlay },
-          onPlaybackStatusUpdate,
-        );
+      let attempt = 0;
 
-        // Unload previous only after new one is ready
-        const oldSound = soundRef.current;
-        soundRef.current = newSound;
-        await oldSound?.unloadAsync();
+      while (attempt < MAX_RETRIES) {
+        try {
+          const { sound: newSound } = await Audio.Sound.createAsync(
+            typeof track.audio === "string"
+              ? { uri: track.audio }
+              : track.audio,
+            { shouldPlay },
+            onPlaybackStatusUpdate,
+          );
 
-        setIsPlaying(shouldPlay);
-      } catch (error) {
-        console.error("Failed to load track:", error);
-        setIsLoading(false);
+          const oldSound = soundRef.current;
+          soundRef.current = newSound;
+          await oldSound?.unloadAsync();
+
+          setIsPlaying(shouldPlay);
+          setIsLoading(false);
+          setIsInitialized(true);
+          return;
+        } catch (error) {
+          attempt += 1;
+          console.warn(
+            `Track load attempt ${attempt}/${MAX_RETRIES} failed:`,
+            error,
+          );
+
+          const errorType = classifyError(error);
+
+          if (errorType === "unsupported") {
+            setPlaybackError("unsupported");
+            setIsLoading(false);
+            setIsInitialized(true);
+            return;
+          }
+
+          if (attempt < MAX_RETRIES) {
+            await wait(RETRY_DELAY_MS);
+          } else {
+            setPlaybackError(errorType);
+            setIsLoading(false);
+            setIsInitialized(true);
+          }
+        }
       }
     },
     [onPlaybackStatusUpdate],
   );
 
-  // ── playNext needs to be a ref so the status callback can call it ─────────
+  // ── Initialize player on app launch ──────────────────────────────────────
+  // Loads the first track in the queue paused and ready to play.
+  // shouldPlay = false so audio doesn't start automatically on open —
+  // the user taps play when they're ready.
+  useEffect(() => {
+    if (queue.length === 0) return;
+
+    // Small delay to ensure audio mode is applied before loading
+    const timer = setTimeout(() => {
+      loadTrack(queue[0], false);
+    }, 100);
+
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // intentionally empty — runs once on mount only
+
+  // ── retryLoad ─────────────────────────────────────────────────────────────
+  const retryLoad = useCallback(async () => {
+    const { track, shouldPlay } = lastLoadParamsRef.current;
+    await loadTrack(track, shouldPlay);
+  }, [loadTrack]);
+
+  // ── playNext ref so status callback can call it without stale closure ─────
   const playNextRef = useRef<(() => Promise<void>) | null>(null);
 
   const playNext = useCallback(async () => {
@@ -181,7 +308,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     await loadTrack(queue[nextIndex], true);
   }, [queue, isShuffle, loadTrack]);
 
-  // Keep ref updated
   useEffect(() => {
     playNextRef.current = playNext;
   }, [playNext]);
@@ -244,8 +370,11 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         queue,
         isPlaying,
         isLoading,
+        isInitialized,
         playbackPosition,
         duration,
+        playbackError,
+        retryLoad,
         play,
         pause,
         togglePlay,
