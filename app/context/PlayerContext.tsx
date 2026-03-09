@@ -8,6 +8,7 @@ import React, {
   ReactNode,
 } from "react";
 import { Dimensions } from "react-native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   Audio,
   AVPlaybackStatus,
@@ -21,6 +22,14 @@ export const MINI_PLAYER_HEIGHT = 70;
 export const SCREEN_HEIGHT = Dimensions.get("window").height;
 
 export type RepeatMode = "off" | "all" | "one";
+
+// ─── Persistence keys ─────────────────────────────────────────────────────────
+
+const STORAGE_KEY_QUEUE = "@cherifi:queue";
+const STORAGE_KEY_INDEX = "@cherifi:currentIndex";
+const STORAGE_KEY_POSITION = "@cherifi:position";
+const STORAGE_KEY_SHUFFLE = "@cherifi:shuffle";
+const STORAGE_KEY_REPEAT = "@cherifi:repeat";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -76,9 +85,13 @@ type PlayerContextType = {
   toggleShuffle: () => void;
   repeatMode: RepeatMode;
   cycleRepeat: () => void;
-  // Like
   isLiked: boolean;
   toggleLike: () => Promise<void>;
+  // Queue management
+  addToQueue: (track: Track) => void;
+  addToQueueNext: (track: Track) => void;
+  removeFromQueue: (trackId: string) => void;
+  reorderQueue: (fromIndex: number, toIndex: number) => void;
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -117,6 +130,71 @@ const classifyError = (error: unknown): PlaybackErrorType => {
   return "load_failed";
 };
 
+// ─── Persistence helpers ──────────────────────────────────────────────────────
+
+async function savePlayerState(
+  queue: Track[],
+  index: number,
+  position: number,
+  shuffle: boolean,
+  repeat: RepeatMode,
+) {
+  try {
+    await AsyncStorage.multiSet([
+      [STORAGE_KEY_QUEUE, JSON.stringify(queue)],
+      [STORAGE_KEY_INDEX, String(index)],
+      [STORAGE_KEY_POSITION, String(position)],
+      [STORAGE_KEY_SHUFFLE, String(shuffle)],
+      [STORAGE_KEY_REPEAT, repeat],
+    ]);
+  } catch (e) {
+    // Non-critical — silently ignore persistence errors
+    console.warn("Failed to persist player state:", e);
+  }
+}
+
+type RestoredState = {
+  queue: Track[];
+  index: number;
+  position: number;
+  shuffle: boolean;
+  repeat: RepeatMode;
+} | null;
+
+async function loadPlayerState(): Promise<RestoredState> {
+  try {
+    const results = await AsyncStorage.multiGet([
+      STORAGE_KEY_QUEUE,
+      STORAGE_KEY_INDEX,
+      STORAGE_KEY_POSITION,
+      STORAGE_KEY_SHUFFLE,
+      STORAGE_KEY_REPEAT,
+    ]);
+
+    const queueRaw = results[0][1];
+    if (!queueRaw) return null;
+
+    const queue: Track[] = JSON.parse(queueRaw);
+    if (!Array.isArray(queue) || queue.length === 0) return null;
+
+    const index = parseInt(results[1][1] ?? "0", 10);
+    const position = parseFloat(results[2][1] ?? "0");
+    const shuffle = results[3][1] === "true";
+    const repeat = (results[4][1] ?? "off") as RepeatMode;
+
+    return {
+      queue,
+      index: isNaN(index) ? 0 : Math.max(0, Math.min(index, queue.length - 1)),
+      position: isNaN(position) ? 0 : position,
+      shuffle,
+      repeat,
+    };
+  } catch (e) {
+    console.warn("Failed to load persisted player state:", e);
+    return null;
+  }
+}
+
 // ─── Context ──────────────────────────────────────────────────────────────────
 
 const PlayerContext = createContext<PlayerContextType | null>(null);
@@ -132,6 +210,9 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     track: Track;
     shouldPlay: boolean;
   } | null>(null);
+
+  // Debounce timer for state persistence
+  const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [queue, setQueue] = useState<Track[]>([]);
   const [currentTrack, setCurrentTrack] = useState<Track | null>(null);
@@ -150,10 +231,30 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     repeatModeRef.current = repeatMode;
   }, [repeatMode]);
 
-  // Seed isLiked from the track whenever currentTrack changes
   useEffect(() => {
     setIsLiked(currentTrack?.isLiked ?? false);
   }, [currentTrack?.id]);
+
+  // ── Persist state (debounced 2 s) ─────────────────────────────────────────
+  useEffect(() => {
+    if (!isInitialized || queue.length === 0) return;
+
+    if (persistTimerRef.current) clearTimeout(persistTimerRef.current);
+
+    persistTimerRef.current = setTimeout(() => {
+      savePlayerState(
+        queue,
+        currentIndexRef.current,
+        playbackPosition,
+        isShuffle,
+        repeatMode,
+      );
+    }, 2000);
+
+    return () => {
+      if (persistTimerRef.current) clearTimeout(persistTimerRef.current);
+    };
+  }, [queue, playbackPosition, isShuffle, repeatMode, isInitialized]);
 
   // ── Audio mode ────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -206,12 +307,12 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
   // ── Load track (with retry) ───────────────────────────────────────────────
   const loadTrack = useCallback(
-    async (track: Track, shouldPlay = true) => {
+    async (track: Track, shouldPlay = true, startPositionMs = 0) => {
       lastLoadParamsRef.current = { track, shouldPlay };
       setPlaybackError(null);
       setIsLoading(true);
       setCurrentTrack(track);
-      setPlaybackPosition(0);
+      setPlaybackPosition(startPositionMs);
       setDuration(0);
 
       const streamUri = TracksService.streamUrl(track.id);
@@ -222,7 +323,10 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         try {
           const { sound: newSound } = await Audio.Sound.createAsync(
             { uri: streamUri },
-            { shouldPlay },
+            {
+              shouldPlay,
+              positionMillis: startPositionMs,
+            },
             onPlaybackStatusUpdate,
           );
 
@@ -234,7 +338,9 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
           setIsLoading(false);
           setIsInitialized(true);
 
-          TracksService.recordPlay(track.id);
+          if (shouldPlay) {
+            TracksService.recordPlay(track.id);
+          }
 
           return;
         } catch (error) {
@@ -266,7 +372,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     [onPlaybackStatusUpdate],
   );
 
-  // ── Fetch queue ───────────────────────────────────────────────────────────
+  // ── Initialize: restore or fetch fresh ───────────────────────────────────
   const fetchQueue = useCallback(async () => {
     try {
       setIsLoading(true);
@@ -297,8 +403,32 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     await fetchQueue();
   }, [fetchQueue]);
 
+  // ── On mount: try to restore, fall back to fresh fetch ───────────────────
   useEffect(() => {
-    fetchQueue();
+    (async () => {
+      const restored = await loadPlayerState();
+
+      if (restored && restored.queue.length > 0) {
+        const {
+          queue: savedQueue,
+          index,
+          position,
+          shuffle,
+          repeat,
+        } = restored;
+
+        setQueue(savedQueue);
+        setIsShuffle(shuffle);
+        setRepeatMode(repeat);
+        repeatModeRef.current = repeat;
+        currentIndexRef.current = index;
+
+        // Load track paused at saved position — don't auto-play on restore
+        await loadTrack(savedQueue[index], false, position);
+      } else {
+        await fetchQueue();
+      }
+    })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -397,14 +527,58 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       prev === "off" ? "all" : prev === "all" ? "one" : "off",
     );
 
+  // ── Queue management ─────────────────────────────────────────────────────
+
+  const addToQueue = (track: Track) => {
+    setQueue((prev) => {
+      if (prev.find((t) => t.id === track.id)) return prev; // already in queue
+      return [...prev, track];
+    });
+  };
+
+  const addToQueueNext = (track: Track) => {
+    setQueue((prev) => {
+      const filtered = prev.filter((t) => t.id !== track.id);
+      const insertAt = currentIndexRef.current + 1;
+      const next = [
+        ...filtered.slice(0, insertAt),
+        track,
+        ...filtered.slice(insertAt),
+      ];
+      return next;
+    });
+  };
+
+  const removeFromQueue = (trackId: string) => {
+    setQueue((prev) => {
+      const idx = prev.findIndex((t) => t.id === trackId);
+      if (idx === -1) return prev;
+      // Adjust currentIndex if we're removing something before it
+      if (idx < currentIndexRef.current) {
+        currentIndexRef.current = Math.max(0, currentIndexRef.current - 1);
+      }
+      return prev.filter((t) => t.id !== trackId);
+    });
+  };
+
+  const reorderQueue = (fromIndex: number, toIndex: number) => {
+    setQueue((prev) => {
+      const next = [...prev];
+      const [moved] = next.splice(fromIndex, 1);
+      next.splice(toIndex, 0, moved);
+      // Keep currentIndex pointing at the same track after reorder
+      const currentTrackId = prev[currentIndexRef.current]?.id;
+      const newIndex = next.findIndex((t) => t.id === currentTrackId);
+      if (newIndex !== -1) currentIndexRef.current = newIndex;
+      return next;
+    });
+  };
+
   // ── Like / Unlike ─────────────────────────────────────────────────────────
   const toggleLike = async () => {
     if (!currentTrack) return;
-
-    // Optimistic update
     const prev = isLiked;
     setIsLiked(!prev);
-
     try {
       if (prev) {
         await TracksService.unlike(currentTrack.id);
@@ -412,7 +586,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         await TracksService.like(currentTrack.id);
       }
     } catch (error) {
-      // Revert on failure
       console.warn("toggleLike failed, reverting:", error);
       setIsLiked(prev);
     }
@@ -446,6 +619,10 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         cycleRepeat,
         isLiked,
         toggleLike,
+        addToQueue,
+        addToQueueNext,
+        removeFromQueue,
+        reorderQueue,
       }}
     >
       {children}
