@@ -21,6 +21,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTrackTransition } from "../hooks/useTrackTransition";
 import QueueSheet from "./QueueSheet";
+import AddToPlaylistModal from "./AddToPlaylistModal"; // ← NEW
 
 const SCREEN_HEIGHT = Dimensions.get("window").height;
 const DISMISS_THRESHOLD = 120;
@@ -92,7 +93,6 @@ export default function ExpandedPlayer() {
   const translateY = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
   const isDragging = useRef(false);
 
-  // Open/close animation
   useEffect(() => {
     if (isDragging.current) {
       isDragging.current = false;
@@ -106,7 +106,6 @@ export default function ExpandedPlayer() {
     }).start();
   }, [isExpanded]);
 
-  // Dismiss pan responder (swipe down to close player)
   const panResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => false,
@@ -144,42 +143,33 @@ export default function ExpandedPlayer() {
   const [showContextMenu, setShowContextMenu] = useState(false);
   const [showQueue, setShowQueue] = useState(false);
 
-  // Seek bar
-  // -------------------------------------------------------------------------
-  // ROOT CAUSE OF BUG: PanResponder.create() runs ONCE at mount. Any state
-  // or prop it closes over (seekBarWidth, duration, seekTo) is frozen at
-  // their initial values (0, 0, stale fn). Dragging therefore always computes
-  // ratio * 0 = 0 and seeks to position 0, restarting the track.
-  //
-  // FIX: Store every value the responder needs in a ref. The ref object is
-  // created once but its .current is always up-to-date. This lets the
-  // PanResponder read the correct live values without being recreated.
-  // -------------------------------------------------------------------------
+  // ── NEW: playlist modal state ─────────────────────────────────────────────
+  const [playlistModalVisible, setPlaylistModalVisible] = useState(false);
+
+  // ── Seek bar ──────────────────────────────────────────────────────────────
   const seekBarWidthRef = useRef(0);
-  const isSeekingActiveRef = useRef(false); // blocks status-update writes during drag
+  const isSeekingActiveRef = useRef(false);
   const seekPositionRef = useRef(0);
   const durationRef = useRef(0);
   const seekToRef = useRef(seekTo);
 
-  // Keep duration ref and seekTo ref in sync every render (cheap, no effect needed)
   durationRef.current = duration;
   seekToRef.current = seekTo;
 
-  // React state — only used to trigger re-renders for the progress UI
   const [isSeeking, setIsSeeking] = useState(false);
   const [seekPosition, setSeekPosition] = useState(0);
 
-  // Seek bar PanResponder — reads refs, never stale state
   const seekPanResponder = useRef(
     PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: () => true,
+      // ── FIX: block seek entirely when track isn't loaded ─────────────────
+      // duration === 0 means nothing is loaded yet; tapping the bar would
+      // seek to 0 and restart the track. Guard both grant and move.
+      onStartShouldSetPanResponder: () => durationRef.current > 0,
+      onMoveShouldSetPanResponder: () => durationRef.current > 0,
 
       onPanResponderGrant: (evt) => {
-        // Mark seeking so onPlaybackStatusUpdate stops overwriting position
         isSeekingActiveRef.current = true;
         setIsSeeking(true);
-
         const x = evt.nativeEvent.locationX;
         const w = seekBarWidthRef.current;
         const clamped = Math.max(0, Math.min(x, w));
@@ -202,11 +192,8 @@ export default function ExpandedPlayer() {
         const w = seekBarWidthRef.current;
         const clamped = Math.max(0, Math.min(x, w));
         const targetMs = w > 0 ? (clamped / w) * durationRef.current : 0;
-
         seekPositionRef.current = targetMs;
         setSeekPosition(targetMs);
-
-        // Perform the actual seek, then re-enable status updates
         seekToRef.current(targetMs).finally(() => {
           isSeekingActiveRef.current = false;
           setIsSeeking(false);
@@ -214,7 +201,6 @@ export default function ExpandedPlayer() {
       },
 
       onPanResponderTerminate: () => {
-        // Gesture cancelled (e.g. another responder took over) — just unlock
         isSeekingActiveRef.current = false;
         setIsSeeking(false);
       },
@@ -230,6 +216,9 @@ export default function ExpandedPlayer() {
   const displayPosition = isSeeking ? seekPosition : playbackPosition;
   const progress = duration > 0 ? (displayPosition / duration) * 100 : 0;
   const repeat = repeatIcon(repeatMode);
+
+  // ── Seek bar opacity — dim when not loaded ────────────────────────────────
+  const seekBarOpacity = duration > 0 ? 1 : 0.4;
 
   // ── Play button ───────────────────────────────────────────────────────────
   const renderPlayButton = () => {
@@ -371,7 +360,7 @@ export default function ExpandedPlayer() {
           />
         </View>
 
-        {/* ── Album Art (animated on track change) ────────────────────────── */}
+        {/* Album Art */}
         <View
           style={{
             width: 280,
@@ -407,7 +396,7 @@ export default function ExpandedPlayer() {
           </Animated.View>
         </View>
 
-        {/* ── Track Info + Like (animated on track change) ─────────────────── */}
+        {/* Track Info + Like */}
         <View
           style={{
             flexDirection: "row",
@@ -418,7 +407,6 @@ export default function ExpandedPlayer() {
           accessible={false}
         >
           <View style={{ flex: 1 }}>
-            {/* Title */}
             <Animated.Text
               style={{
                 color: "white",
@@ -433,8 +421,6 @@ export default function ExpandedPlayer() {
             >
               {currentTrack.title}
             </Animated.Text>
-
-            {/* Artist */}
             <Animated.Text
               style={{
                 color: "#B3B3B3",
@@ -464,7 +450,7 @@ export default function ExpandedPlayer() {
           />
         </View>
 
-        {/* ── Error banner ─────────────────────────────────────────────────── */}
+        {/* Error banner */}
         {playbackError && (
           <View
             style={{
@@ -497,9 +483,9 @@ export default function ExpandedPlayer() {
           </View>
         )}
 
-        {/* ── Seek / Progress Bar ──────────────────────────────────────────── */}
+        {/* Seek / Progress Bar */}
         <View
-          style={{ width: "100%", marginBottom: 8 }}
+          style={{ width: "100%", marginBottom: 8, opacity: seekBarOpacity }}
           accessible
           accessibilityLabel={`Playback position: ${formatTime(displayPosition)} of ${formatTime(duration)}`}
           accessibilityRole="adjustable"
@@ -513,6 +499,7 @@ export default function ExpandedPlayer() {
             { name: "decrement", label: "Skip back 10 seconds" },
           ]}
           onAccessibilityAction={(event) => {
+            if (duration === 0) return; // ← FIX: also guard accessibility actions
             if (event.nativeEvent.actionName === "increment") {
               seekTo(Math.min(displayPosition + 10000, duration));
             } else if (event.nativeEvent.actionName === "decrement") {
@@ -520,14 +507,9 @@ export default function ExpandedPlayer() {
             }
           }}
         >
-          {/* Track bar — touch target */}
           <View
             onLayout={onSeekBarLayout}
-            style={{
-              height: 20,
-              justifyContent: "center",
-              // Extra vertical hit area
-            }}
+            style={{ height: 20, justifyContent: "center" }}
             {...seekPanResponder.panHandlers}
             accessibilityElementsHidden
             importantForAccessibility="no-hide-descendants"
@@ -551,8 +533,8 @@ export default function ExpandedPlayer() {
               />
             </View>
 
-            {/* Thumb */}
-            {(isSeeking || seekBarWidthRef.current > 0) && (
+            {/* Thumb — only show once duration is known */}
+            {duration > 0 && (isSeeking || seekBarWidthRef.current > 0) && (
               <View
                 style={{
                   position: "absolute",
@@ -595,7 +577,7 @@ export default function ExpandedPlayer() {
           </View>
         </View>
 
-        {/* ── Main Controls ─────────────────────────────────────────────────── */}
+        {/* Main Controls */}
         <View
           style={{
             flexDirection: "row",
@@ -661,7 +643,7 @@ export default function ExpandedPlayer() {
           </View>
         </View>
 
-        {/* ── Bottom Actions ────────────────────────────────────────────────── */}
+        {/* Bottom Actions */}
         <View
           style={{
             flexDirection: "row",
@@ -685,11 +667,12 @@ export default function ExpandedPlayer() {
             accessibilityLabel="Share track"
             accessibilityHint="Double tap to share this track"
           />
+          {/* ── CHANGED: open AddToPlaylistModal instead of Alert ─────────── */}
           <IconButton
             name="add-circle-outline"
             size={22}
             color="#B3B3B3"
-            onPress={() => Alert.alert("Add to Playlist", "Coming soon")}
+            onPress={() => setPlaylistModalVisible(true)}
             accessibilityLabel="Add to playlist"
             accessibilityHint="Double tap to add this track to a playlist"
           />
@@ -709,7 +692,6 @@ export default function ExpandedPlayer() {
             accessibilityLabel="Show lyrics"
             accessibilityHint="Double tap to view track lyrics"
           />
-          {/* ── Queue button — now wired up ── */}
           <IconButton
             name="list-outline"
             size={22}
@@ -721,10 +703,17 @@ export default function ExpandedPlayer() {
         </View>
       </Animated.View>
 
-      {/* ── Queue Sheet ──────────────────────────────────────────────────────── */}
+      {/* Queue Sheet */}
       <QueueSheet visible={showQueue} onClose={() => setShowQueue(false)} />
 
-      {/* ── Context Menu Modal ───────────────────────────────────────────────── */}
+      {/* Add to Playlist Modal — NEW */}
+      <AddToPlaylistModal
+        trackId={currentTrack.id}
+        visible={playlistModalVisible}
+        onClose={() => setPlaylistModalVisible(false)}
+      />
+
+      {/* Context Menu */}
       <Modal
         visible={showContextMenu}
         transparent

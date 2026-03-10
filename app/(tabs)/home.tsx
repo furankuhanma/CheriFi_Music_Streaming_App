@@ -1,3 +1,10 @@
+// CheriFi/app/(tabs)/home.tsx
+// Changes from original:
+//   1. Import AddToPlaylistModal
+//   2. Add playlistTrackId + playlistModalVisible state
+//   3. Replace Alert.alert("Add to Playlist") with modal open
+//   4. Add <AddToPlaylistModal> at the bottom of the return
+
 import { useEffect, useState, useCallback, useRef } from "react";
 import {
   ScrollView,
@@ -15,6 +22,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { usePlayer } from "../context/PlayerContext";
 import { RecommendationsService } from "../services/recommendations.service";
 import { TracksService, Track } from "../services/tracks.service";
+import AddToPlaylistModal from "../components/AddToPlaylistModal"; // ← NEW
 
 const recentItems = ["Liked Songs", "Daily Mix 1", "Top Hits", "Chill Vibes"];
 
@@ -40,13 +48,11 @@ function TrackActionSheet({
 }) {
   const translateY = useRef(new Animated.Value(600)).current;
   const backdropOpacity = useRef(new Animated.Value(0)).current;
-  // Keep track mounted during close animation
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
     if (visible) {
       setMounted(true);
-      // Run open animations in parallel
       Animated.parallel([
         Animated.spring(translateY, {
           toValue: 0,
@@ -61,7 +67,6 @@ function TrackActionSheet({
         }),
       ]).start();
     } else {
-      // Run close animations in parallel, then unmount
       Animated.parallel([
         Animated.spring(translateY, {
           toValue: 600,
@@ -90,7 +95,6 @@ function TrackActionSheet({
       onRequestClose={onClose}
       statusBarTranslucent
     >
-      {/* Animated backdrop */}
       <Animated.View
         style={{
           flex: 1,
@@ -107,7 +111,6 @@ function TrackActionSheet({
         />
       </Animated.View>
 
-      {/* Sheet */}
       <Animated.View
         style={{
           position: "absolute",
@@ -121,7 +124,6 @@ function TrackActionSheet({
           transform: [{ translateY }],
         }}
       >
-        {/* Drag handle */}
         <View style={{ alignItems: "center", paddingVertical: 12 }}>
           <View
             style={{
@@ -133,7 +135,6 @@ function TrackActionSheet({
           />
         </View>
 
-        {/* Track info header */}
         {track && (
           <View
             style={{
@@ -188,13 +189,11 @@ function TrackActionSheet({
           </View>
         )}
 
-        {/* Actions */}
         {actions.map((action) => (
           <TouchableOpacity
             key={action.label}
             onPress={() => {
               onClose();
-              // Small delay so sheet closes before action fires
               setTimeout(action.onPress, 200);
             }}
             style={{
@@ -391,11 +390,13 @@ export default function HomeScreen() {
   const [forYouError, setForYouError] = useState(false);
   const [popularError, setPopularError] = useState(false);
 
-  // Track action sheet state
   const [selectedTrack, setSelectedTrack] = useState<Track | null>(null);
   const [sheetVisible, setSheetVisible] = useState(false);
 
-  // Per-track liked state (optimistic, local to home screen)
+  // ── NEW: playlist modal state ─────────────────────────────────────────────
+  const [playlistTrackId, setPlaylistTrackId] = useState<string | null>(null);
+  const [playlistModalVisible, setPlaylistModalVisible] = useState(false);
+
   const [likedIds, setLikedIds] = useState<Set<string>>(new Set());
 
   // ── Data loading ────────────────────────────────────────────────────────────
@@ -406,7 +407,6 @@ export default function HomeScreen() {
     try {
       const tracks = await RecommendationsService.smart();
       setForYou(tracks);
-      // Seed liked state from track data
       setLikedIds((prev) => {
         const next = new Set(prev);
         tracks.forEach((t) => {
@@ -453,19 +453,16 @@ export default function HomeScreen() {
     setSheetVisible(true);
   }, []);
 
-  // ── Like toggle (local + API) ───────────────────────────────────────────────
+  // ── Like toggle ─────────────────────────────────────────────────────────────
 
   const handleLikeToggle = useCallback(
     async (track: Track) => {
       const wasLiked = likedIds.has(track.id);
-
-      // Optimistic update
       setLikedIds((prev) => {
         const next = new Set(prev);
         wasLiked ? next.delete(track.id) : next.add(track.id);
         return next;
       });
-
       try {
         if (wasLiked) {
           await TracksService.unlike(track.id);
@@ -473,7 +470,6 @@ export default function HomeScreen() {
           await TracksService.like(track.id);
         }
       } catch {
-        // Revert on failure
         setLikedIds((prev) => {
           const next = new Set(prev);
           wasLiked ? next.add(track.id) : next.delete(track.id);
@@ -484,25 +480,20 @@ export default function HomeScreen() {
     [likedIds],
   );
 
-  // ── Build actions for selected track ───────────────────────────────────────
+  // ── Build actions ───────────────────────────────────────────────────────────
 
   const buildActions = (track: Track): TrackAction[] => {
     const trackIsLiked = likedIds.has(track.id);
-
     return [
       {
         icon: "play-skip-forward-outline",
         label: "Play next",
-        onPress: () => {
-          addToQueueNext(track);
-        },
+        onPress: () => addToQueueNext(track),
       },
       {
         icon: "add-circle-outline",
         label: "Add to queue",
-        onPress: () => {
-          addToQueue(track);
-        },
+        onPress: () => addToQueue(track),
       },
       {
         icon: trackIsLiked ? "heart" : "heart-outline",
@@ -513,7 +504,11 @@ export default function HomeScreen() {
       {
         icon: "list-outline",
         label: "Add to playlist",
-        onPress: () => Alert.alert("Add to Playlist", "Coming soon"),
+        // ── CHANGED: open modal instead of Alert ────────────────────────────
+        onPress: () => {
+          setPlaylistTrackId(track.id);
+          setPlaylistModalVisible(true);
+        },
       },
       {
         icon: "download-outline",
@@ -532,7 +527,6 @@ export default function HomeScreen() {
           Good evening 👋
         </Text>
 
-        {/* Recent items grid */}
         <View className="flex-row flex-wrap gap-2 mb-8">
           {recentItems.map((item) => (
             <View
@@ -551,7 +545,6 @@ export default function HomeScreen() {
           ))}
         </View>
 
-        {/* For You */}
         <Section
           title="For You"
           tracks={forYou}
@@ -563,7 +556,6 @@ export default function HomeScreen() {
           onTrackLongPress={handleLongPress}
         />
 
-        {/* Popular */}
         <Section
           title="Popular"
           tracks={popular}
@@ -584,6 +576,13 @@ export default function HomeScreen() {
         visible={sheetVisible}
         onClose={() => setSheetVisible(false)}
         actions={selectedTrack ? buildActions(selectedTrack) : []}
+      />
+
+      {/* Add to playlist modal — NEW */}
+      <AddToPlaylistModal
+        trackId={playlistTrackId}
+        visible={playlistModalVisible}
+        onClose={() => setPlaylistModalVisible(false)}
       />
     </SafeAreaView>
   );

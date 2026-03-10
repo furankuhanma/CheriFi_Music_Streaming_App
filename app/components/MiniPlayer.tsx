@@ -57,60 +57,62 @@ export default function MiniPlayer() {
       }}
       accessible={false}
     >
-      <TouchableOpacity
-        onPress={() => setIsExpanded(true)}
-        activeOpacity={0.9}
-        style={{ paddingHorizontal: 12, paddingVertical: 10 }}
-        accessibilityRole="button"
-        accessibilityLabel={`Now playing: ${currentTrack.title} by ${currentTrack.artist.name}`}
-        accessibilityHint="Double tap to open full player"
-      >
+      <View style={{ paddingHorizontal: 12, paddingVertical: 10 }}>
         {/* Row: album art + info + controls */}
         <View
           style={{ flexDirection: "row", alignItems: "center" }}
           accessible={false}
         >
-          <Animated.Image
-            source={{ uri: currentTrack.coverUrl ?? undefined }}
-            style={{
-              width: 44,
-              height: 44,
-              borderRadius: 4,
-              marginRight: 10,
-              opacity: albumArtOpacity,
-            }}
-            accessibilityLabel={`Album art for ${currentTrack.title}`}
-            accessibilityIgnoresInvertColors
-          />
-
-          {/* Track info */}
-          <View
-            style={{ flex: 1 }}
-            accessible
-            accessibilityLabel={`${currentTrack.title}, ${currentTrack.artist.name}`}
+          {/* ── Tappable info area — expands the player ── */}
+          <TouchableOpacity
+            onPress={() => setIsExpanded(true)}
+            activeOpacity={0.9}
+            style={{ flex: 1, flexDirection: "row", alignItems: "center" }}
+            accessibilityRole="button"
+            accessibilityLabel={`Now playing: ${currentTrack.title} by ${currentTrack.artist.name}`}
+            accessibilityHint="Double tap to open full player"
           >
-            <Text
-              style={{ color: "white", fontSize: 13, fontWeight: "600" }}
-              numberOfLines={1}
-              accessibilityElementsHidden
+            <Animated.Image
+              source={{ uri: currentTrack.coverUrl ?? undefined }}
+              style={{
+                width: 44,
+                height: 44,
+                borderRadius: 4,
+                marginRight: 10,
+                opacity: albumArtOpacity,
+              }}
+              accessibilityLabel={`Album art for ${currentTrack.title}`}
+              accessibilityIgnoresInvertColors
+            />
+
+            {/* Track info */}
+            <View
+              style={{ flex: 1 }}
+              accessible
+              accessibilityLabel={`${currentTrack.title}, ${currentTrack.artist.name}`}
             >
-              {currentTrack.title}
-            </Text>
-            <Text
-              style={{ color: "#B3B3B3", fontSize: 11 }}
-              numberOfLines={1}
-              accessibilityElementsHidden
-            >
-              {currentTrack.artist.name}
-            </Text>
-          </View>
+              <Text
+                style={{ color: "white", fontSize: 13, fontWeight: "600" }}
+                numberOfLines={1}
+                accessibilityElementsHidden
+              >
+                {currentTrack.title}
+              </Text>
+              <Text
+                style={{ color: "#B3B3B3", fontSize: 11 }}
+                numberOfLines={1}
+                accessibilityElementsHidden
+              >
+                {currentTrack.artist.name}
+              </Text>
+            </View>
+          </TouchableOpacity>
+
+          {/* ── Controls — siblings of the expand touchable, never intercepted ── */}
 
           {/* Like button */}
           <TouchableOpacity
-            onPress={(e) => {
-              e.stopPropagation();
-              toggleLike();
-            }}
+            onPress={toggleLike}
             style={{ padding: 8 }}
             accessibilityRole="button"
             accessibilityLabel={isLiked ? "Unlike track" : "Like track"}
@@ -145,10 +147,7 @@ export default function MiniPlayer() {
             />
           ) : playbackError ? (
             <TouchableOpacity
-              onPress={(e) => {
-                e.stopPropagation();
-                retryLoad();
-              }}
+              onPress={retryLoad}
               style={{ padding: 8 }}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               accessibilityRole="button"
@@ -203,7 +202,7 @@ export default function MiniPlayer() {
             }}
           />
         </View>
-      </TouchableOpacity>
+      </View>
     </View>
   );
 }

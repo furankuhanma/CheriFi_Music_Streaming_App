@@ -1,3 +1,11 @@
+// backend/src/app.ts
+// Add these two lines alongside your existing route imports/registrations:
+//
+//   import playlistsRoutes from "./modules/playlist/playlists.routes";
+//   app.use("/api/playlists", playlistsRoutes);
+//
+// ─── Full updated file ────────────────────────────────────────────────────────
+
 import express from "express";
 import cors from "cors";
 import helmet from "helmet";
@@ -8,6 +16,7 @@ import path from "path";
 import authRoutes from "./modules/auth/auth.routes";
 import tracksRoutes from "./modules/tracks/tracks.routes";
 import recommendationsRoutes from "./modules/recommendations/recommendations.routes";
+import playlistsRoutes from "./modules/playlist/playlists.routes";
 import { errorHandler } from "./middleware/errorHandler";
 
 const app = express();
@@ -23,14 +32,14 @@ app.use(
 
 // ── Rate limiting ─────────────────────────────────────────────────────────────
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
+  windowMs: 15 * 60 * 1000,
   max: 200,
   message: { success: false, error: "Too many requests, please try again later" },
 });
 
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 20, // stricter for auth endpoints
+  max: 20,
   message: { success: false, error: "Too many auth attempts, please try again later" },
 });
 
@@ -46,7 +55,6 @@ if (process.env.NODE_ENV !== "test") {
 }
 
 // ── Static uploads ────────────────────────────────────────────────────────────
-// Serves album art and other static assets
 app.use(
   "/uploads",
   express.static(path.resolve(process.env.UPLOADS_DIR ?? "./uploads")),
@@ -56,6 +64,7 @@ app.use(
 app.use("/api/auth", authLimiter, authRoutes);
 app.use("/api/tracks", tracksRoutes);
 app.use("/api/recommendations", recommendationsRoutes);
+app.use("/api/playlists", playlistsRoutes);
 
 // ── Health check ──────────────────────────────────────────────────────────────
 app.get("/health", (_, res) => {

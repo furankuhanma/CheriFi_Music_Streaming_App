@@ -1,11 +1,11 @@
 import "../global.css";
 import { Slot, useRouter, useSegments } from "expo-router";
 import { SafeAreaProvider } from "react-native-safe-area-context";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { PlayerProvider } from "./context/PlayerContext";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import { useEffect } from "react";
 import { View, ActivityIndicator } from "react-native";
-
 // ─── Route Guard ──────────────────────────────────────────────────────────────
 // Sits inside AuthProvider so it can read auth state.
 // Redirects unauthenticated users to /login.
@@ -53,12 +53,14 @@ function RouteGuard() {
 
 export default function RootLayout() {
   return (
-    <AuthProvider>
-      <PlayerProvider>
-        <SafeAreaProvider>
-          <RouteGuard />
-        </SafeAreaProvider>
-      </PlayerProvider>
-    </AuthProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <AuthProvider>
+        <PlayerProvider>
+          <SafeAreaProvider>
+            <RouteGuard />
+          </SafeAreaProvider>
+        </PlayerProvider>
+      </AuthProvider>
+    </GestureHandlerRootView>
   );
 }
