@@ -675,9 +675,19 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   }, [position]);
 
   const playTrack = useCallback(async (track: Track) => {
-    const q = queueRef.current;
-    const idx = q.findIndex((t) => t.id === track.id);
-    if (idx === -1) return;
+    let q = queueRef.current;
+    let idx = q.findIndex((t) => t.id === track.id);
+
+    // If the track is not in the queue yet (e.g. freshly requested from Search),
+    // append it so tapping can play immediately.
+    if (idx === -1) {
+      const nextQueue = [...q, track];
+      idx = nextQueue.length - 1;
+      queueRef.current = nextQueue;
+      setQueue(nextQueue);
+      await TrackPlayer.add(toRNTPTrack(track));
+      q = nextQueue;
+    }
 
     currentIndexRef.current = idx;
     setCurrentTrack(q[idx]);

@@ -18,6 +18,8 @@ import tracksRoutes from "./modules/tracks/tracks.routes";
 import recommendationsRoutes from "./modules/recommendations/recommendations.routes";
 import playlistsRoutes from "./modules/playlist/playlists.routes";
 import { errorHandler } from "./middleware/errorHandler";
+import searchRoutes from "./modules/search/search.routes";
+
 
 const app = express();
 
@@ -65,6 +67,7 @@ app.use("/api/auth", authLimiter, authRoutes);
 app.use("/api/tracks", tracksRoutes);
 app.use("/api/recommendations", recommendationsRoutes);
 app.use("/api/playlists", playlistsRoutes);
+app.use("/api/search", searchRoutes);
 
 // ── Health check ──────────────────────────────────────────────────────────────
 app.get("/health", (_, res) => {

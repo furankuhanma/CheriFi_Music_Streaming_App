@@ -57,7 +57,11 @@ router.get(
   "/for-you",
   requireAuth as any,
   (req, res, next) =>
-    RecommendationsController.forUser(req as AuthenticatedRequest, res, next),
+    RecommendationsController.forUser(
+      req as unknown as AuthenticatedRequest,
+      res,
+      next,
+    ),
 );
 
 // Popular — public
@@ -65,7 +69,11 @@ router.get(
   "/popular",
   optionalAuth as any,
   (req, res, next) =>
-    RecommendationsController.popular(req as AuthenticatedRequest, res, next),
+    RecommendationsController.popular(
+      req as unknown as AuthenticatedRequest,
+      res,
+      next,
+    ),
 );
 
 // Related to a specific track — optional auth
@@ -74,7 +82,7 @@ router.get(
   optionalAuth as any,
   (req, res, next) =>
     RecommendationsController.relatedTo(
-      req as AuthenticatedRequest,
+      req as unknown as AuthenticatedRequest,
       res,
       next,
     ),

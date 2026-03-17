@@ -4,7 +4,7 @@ import { AuthStore } from "../../stores/auth.store";
 // Use your machine's local IP so the phone/emulator can reach the backend.
 // Find it with: ip addr show | grep "inet " (Linux) or ipconfig (Windows)
 // Replace with your actual local IP when testing on a real device.
-const BASE_URL = "http://192.168.1.12:3000/api";
+const BASE_URL = "https://frank-loui-lapore-hp-probook-640-g1.tail11c2e9.ts.net/api";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -19,14 +19,30 @@ export class ApiError extends Error {
 }
 
 // ─── Token refresh state ──────────────────────────────────────────────────────
-// Prevents multiple simultaneous refresh calls if several requests fail at once
 
 let isRefreshing = false;
-let refreshQueue: Array<(token: string) => void> = [];
+let refreshQueue: Array<(token: string | null) => void> = [];
+
+const AUTH_PATHS_THAT_SHOULD_NOT_REFRESH = [
+  "/auth/login",
+  "/auth/register",
+  "/auth/refresh",
+  "/auth/logout",
+  "/auth/oauth",
+];
+
+function shouldAttemptRefresh(path: string): boolean {
+  return !AUTH_PATHS_THAT_SHOULD_NOT_REFRESH.some((authPath) =>
+    path.startsWith(authPath),
+  );
+}
 
 async function refreshAccessToken(): Promise<string> {
   const refreshToken = await AuthStore.getRefreshToken();
-  if (!refreshToken) throw new ApiError(401, "No refresh token");
+  if (!refreshToken) {
+    await AuthStore.clearTokens(); // ensure clean state
+    throw new ApiError(401, "No refresh token — please log in again");
+  }
 
   const res = await fetch(`${BASE_URL}/auth/refresh`, {
     method: "POST",
@@ -45,14 +61,13 @@ async function refreshAccessToken(): Promise<string> {
   return accessToken;
 }
 
-// ─── Core fetch wrapper ───────────────────────────────────────────────────────
-
 async function request<T>(
   path: string,
   options: RequestInit = {},
   retry = true,
+  accessTokenOverride?: string,
 ): Promise<T> {
-  const accessToken = await AuthStore.getAccessToken();
+  const accessToken = accessTokenOverride ?? (await AuthStore.getAccessToken());
 
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -65,22 +80,38 @@ async function request<T>(
 
   const res = await fetch(`${BASE_URL}${path}`, { ...options, headers });
 
-  // ── Token expired — attempt refresh then retry once ───────────────────────
-  if (res.status === 401 && retry) {
+  if (res.status === 401 && retry && shouldAttemptRefresh(path)) {
     if (isRefreshing) {
-      // Wait for the in-progress refresh to complete
-      const newToken = await new Promise<string>((resolve) => {
+      // Wait for the in-progress refresh, then use the new token
+      const newToken = await new Promise<string | null>((resolve) => {
         refreshQueue.push(resolve);
       });
-      return request<T>(path, options, false);
+
+      if (!newToken) throw new ApiError(401, "Session expired");
+
+      // ✅ Actually inject the new token instead of re-reading storage
+      const retryHeaders = {
+        ...headers,
+        Authorization: `Bearer ${newToken}`,
+      };
+      return request<T>(
+        path,
+        { ...options, headers: retryHeaders },
+        false,
+        newToken,
+      );
     }
 
     isRefreshing = true;
     try {
       const newToken = await refreshAccessToken();
-      refreshQueue.forEach((resolve) => resolve(newToken));
+      refreshQueue.forEach((resolve) => resolve(newToken)); // ✅ pass token
       refreshQueue = [];
-      return request<T>(path, options, false);
+      return request<T>(path, options, false, newToken);
+    } catch (err) {
+      refreshQueue.forEach((resolve) => resolve(null)); // ✅ unblock queue on failure
+      refreshQueue = [];
+      throw err;
     } finally {
       isRefreshing = false;
     }
@@ -88,15 +119,16 @@ async function request<T>(
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new ApiError(res.status, body.error ?? `Request failed: ${res.status}`);
+    throw new ApiError(
+      res.status,
+      body.error ?? `Request failed: ${res.status}`,
+    );
   }
 
-  // 204 No Content
   if (res.status === 204) return undefined as T;
 
   return res.json();
 }
-
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 export const api = {

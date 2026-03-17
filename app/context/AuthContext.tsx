@@ -8,6 +8,7 @@ import React, {
 } from "react";
 import { AuthService, AuthUser } from "../services/auth.service";
 import { AuthStore } from "../../stores/auth.store";
+import { ApiError } from "../services/api";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -39,17 +40,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [authError, setAuthError] = useState<string | null>(null);
 
   // ── Restore session on app launch ──────────────────────────────────────────
+
   useEffect(() => {
     (async () => {
       try {
         const loggedIn = await AuthStore.isLoggedIn();
         if (!loggedIn) return;
-        // Token exists — verify still valid, api.ts auto-refreshes if expired
         const me = await AuthService.me();
         setUser(me);
-      } catch {
-        // Token invalid — clear and force login
+      } catch (err) {
         await AuthStore.clearTokens();
+        // If it's a 401, tokens are gone — user must log in again (already handled)
+        // No need to surface error, just fall through to login screen
       } finally {
         setIsLoadingAuth(false);
       }

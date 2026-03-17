@@ -553,7 +553,7 @@ export default function HomeScreen() {
           onRetry={loadForYou}
           currentTrackId={currentTrack?.id ?? null}
           onTrackPress={playTrack}
-          onTrackLongPress={handleLongPress}
+          onTrackLongPress={handleLongPress}  
         />
 
         <Section
