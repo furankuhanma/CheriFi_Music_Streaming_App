@@ -15,6 +15,7 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { PlaylistsService, Playlist } from "../services/playlists.api";
+import PlaylistCover from "./PlaylistCover";
 
 type Props = {
   trackId: string | null;
@@ -432,28 +433,12 @@ export default function AddToPlaylistModal({
                             : `Add to ${item.title}`
                         }
                       >
-                        <View
-                          style={{
-                            width: 48,
-                            height: 48,
-                            borderRadius: 6,
-                            backgroundColor: alreadyAdded
-                              ? "#1DB954"
-                              : "#282828",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            marginRight: 12,
-                          }}
-                        >
-                          {alreadyAdded ? (
-                            <Ionicons name="checkmark" size={22} color="#000" />
-                          ) : (
-                            <Ionicons
-                              name="musical-notes"
-                              size={20}
-                              color="#555"
-                            />
-                          )}
+                        <View style={{ marginRight: 12 }}>
+                          <PlaylistCover
+                            playlist={item}
+                            size={48}
+                            rounded={6}
+                          />
                         </View>
                         <View style={{ flex: 1 }}>
                           <Text

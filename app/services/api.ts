@@ -80,6 +80,31 @@ async function request<T>(
 
   const res = await fetch(`${BASE_URL}${path}`, { ...options, headers });
 
+  // Handle rate limiting (429 Too Many Requests)
+  // For auth endpoints, be more conservative and don't retry
+  // For other endpoints, retry with backoff
+  if (res.status === 429) {
+    if (path.startsWith("/auth")) {
+      // Don't retry auth endpoints - let the error propagate
+      const body = await res.json().catch(() => ({}));
+      throw new ApiError(
+        429,
+        body.error ?? "Too many authentication attempts. Please try again later.",
+      );
+    }
+    
+    if (retry) {
+      // For non-auth endpoints, retry with longer backoff
+      const retryAfter = parseInt(res.headers.get("retry-after") ?? "5", 10);
+      const delayMs = Math.min(retryAfter * 1000, 10000);
+      await new Promise(resolve => setTimeout(resolve, delayMs));
+      return request<T>(path, options, false, accessTokenOverride);
+    }
+    
+    const body = await res.json().catch(() => ({}));
+    throw new ApiError(429, body.error ?? "Request rate limited");
+  }
+
   if (res.status === 401 && retry && shouldAttemptRefresh(path)) {
     if (isRefreshing) {
       // Wait for the in-progress refresh, then use the new token

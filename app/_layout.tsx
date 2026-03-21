@@ -4,6 +4,10 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { PlayerProvider } from "./context/PlayerContext";
 import { AuthProvider, useAuth } from "./context/AuthContext";
+import { OfflineProvider } from "./context/OfflineContext";
+import { DownloadProvider } from "./context/DownloadContext";
+import { DownloadNotificationBar } from "./components/DownloadNotificationBar";
+import { useDownloadIntegration } from "./hooks/useDownloadIntegration";
 import { useEffect } from "react";
 import { View, ActivityIndicator } from "react-native";
 // ─── Route Guard ──────────────────────────────────────────────────────────────
@@ -15,6 +19,10 @@ function RouteGuard() {
   const { isLoggedIn, isLoadingAuth } = useAuth();
   const segments = useSegments();
   const router = useRouter();
+
+  // Must be called unconditionally (Rules of Hooks).
+  // The hook itself internally no-ops when logged out.
+  useDownloadIntegration();
 
   useEffect(() => {
     if (isLoadingAuth) return;
@@ -49,17 +57,35 @@ function RouteGuard() {
   return <Slot />;
 }
 
+// ─── Download Notification Wrapper ────────────────────────────────────────────
+// Only show notifications when user is authenticated
+
+function DownloadNotificationWrapper() {
+  const { isLoggedIn } = useAuth();
+
+  if (!isLoggedIn) return null;
+
+  return <DownloadNotificationBar />;
+}
+
 // ─── Root Layout ──────────────────────────────────────────────────────────────
 
 export default function RootLayout() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <AuthProvider>
-        <PlayerProvider>
-          <SafeAreaProvider>
-            <RouteGuard />
-          </SafeAreaProvider>
-        </PlayerProvider>
+        <OfflineProvider>
+          <DownloadProvider>
+            <PlayerProvider>
+              <SafeAreaProvider>
+                <View style={{ flex: 1 }}>
+                  <RouteGuard />
+                  <DownloadNotificationWrapper />
+                </View>
+              </SafeAreaProvider>
+            </PlayerProvider>
+          </DownloadProvider>
+        </OfflineProvider>
       </AuthProvider>
     </GestureHandlerRootView>
   );

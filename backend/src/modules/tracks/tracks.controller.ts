@@ -3,6 +3,47 @@ import { TracksService } from "./tracks.service";
 import { AuthenticatedRequest } from "../../types";
 
 export const TracksController = {
+  async getDownloads(
+    req: AuthenticatedRequest,
+    res: Response,
+    next: NextFunction,
+  ) {
+    try {
+      const limit = Math.min(parseInt(req.query.limit as string) || 100, 200);
+      const tracks = await TracksService.getDownloads(req.user.userId, limit);
+      res.json({ success: true, data: tracks });
+    } catch (err) {
+      next(err);
+    }
+  },
+
+  async getLiked(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+    try {
+      const limit = Math.min(parseInt(req.query.limit as string) || 100, 200);
+      const tracks = await TracksService.getLiked(req.user.userId, limit);
+      res.json({ success: true, data: tracks });
+    } catch (err) {
+      next(err);
+    }
+  },
+
+  async getRecentlyPlayed(
+    req: AuthenticatedRequest,
+    res: Response,
+    next: NextFunction,
+  ) {
+    try {
+      const limit = Math.min(parseInt(req.query.limit as string) || 100, 200);
+      const tracks = await TracksService.getRecentlyPlayed(
+        req.user.userId,
+        limit,
+      );
+      res.json({ success: true, data: tracks });
+    } catch (err) {
+      next(err);
+    }
+  },
+
   async getAll(req: AuthenticatedRequest, res: Response, next: NextFunction) {
     try {
       const page = parseInt(req.query.page as string) || 1;

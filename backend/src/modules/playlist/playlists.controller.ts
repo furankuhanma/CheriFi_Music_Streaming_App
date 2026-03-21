@@ -28,13 +28,57 @@ export const PlaylistsController = {
 
   async create(req: AuthenticatedRequest, res: Response, next: NextFunction) {
     try {
-      const { title, description } = req.body;
+      const { title, description, coverUrl } = req.body;
       if (!title?.trim()) {
         res.status(400).json({ success: false, error: "Title is required" });
         return;
       }
-      const playlist = await PlaylistsService.create(req.user.userId, title.trim(), description);
+      const playlist = await PlaylistsService.create(
+        req.user.userId,
+        title.trim(),
+        description,
+        coverUrl,
+      );
       res.status(201).json({ success: true, data: playlist });
+    } catch (err) {
+      next(err);
+    }
+  },
+
+  async update(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+    try {
+      const { title, description, coverUrl } = req.body;
+
+      if (
+        title === undefined &&
+        description === undefined &&
+        coverUrl === undefined
+      ) {
+        res.status(400).json({ success: false, error: "Nothing to update" });
+        return;
+      }
+
+      if (title !== undefined && !String(title).trim()) {
+        res.status(400).json({ success: false, error: "Title cannot be empty" });
+        return;
+      }
+
+      const updated = await PlaylistsService.update(
+        req.params.id,
+        req.user.userId,
+        {
+          title: title !== undefined ? String(title).trim() : undefined,
+          description,
+          coverUrl,
+        },
+      );
+
+      if (!updated) {
+        res.status(404).json({ success: false, error: "Playlist not found" });
+        return;
+      }
+
+      res.json({ success: true, data: updated });
     } catch (err) {
       next(err);
     }

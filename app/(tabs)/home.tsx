@@ -5,227 +5,17 @@
 //   3. Replace Alert.alert("Add to Playlist") with modal open
 //   4. Add <AddToPlaylistModal> at the bottom of the return
 
-import { useEffect, useState, useCallback, useRef } from "react";
-import {
-  ScrollView,
-  Text,
-  View,
-  TouchableOpacity,
-  Image,
-  ActivityIndicator,
-  Modal,
-  Animated,
-  Alert,
-} from "react-native";
+import { useEffect, useState, useCallback } from "react";
+import { ScrollView, Text, View, TouchableOpacity, Image } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { usePlayer } from "../context/PlayerContext";
 import { RecommendationsService } from "../services/recommendations.service";
 import { TracksService, Track } from "../services/tracks.service";
 import AddToPlaylistModal from "../components/AddToPlaylistModal"; // ← NEW
+import TrackActionsSheet from "../components/TrackActionsSheet";
 
 const recentItems = ["Liked Songs", "Daily Mix 1", "Top Hits", "Chill Vibes"];
-
-// ─── Track Action Sheet ───────────────────────────────────────────────────────
-
-type TrackAction = {
-  icon: string;
-  label: string;
-  color?: string;
-  onPress: () => void;
-};
-
-function TrackActionSheet({
-  track,
-  visible,
-  onClose,
-  actions,
-}: {
-  track: Track | null;
-  visible: boolean;
-  onClose: () => void;
-  actions: TrackAction[];
-}) {
-  const translateY = useRef(new Animated.Value(600)).current;
-  const backdropOpacity = useRef(new Animated.Value(0)).current;
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => {
-    if (visible) {
-      setMounted(true);
-      Animated.parallel([
-        Animated.spring(translateY, {
-          toValue: 0,
-          useNativeDriver: true,
-          bounciness: 0,
-          speed: 20,
-        }),
-        Animated.timing(backdropOpacity, {
-          toValue: 1,
-          duration: 200,
-          useNativeDriver: true,
-        }),
-      ]).start();
-    } else {
-      Animated.parallel([
-        Animated.spring(translateY, {
-          toValue: 600,
-          useNativeDriver: true,
-          bounciness: 0,
-          speed: 20,
-        }),
-        Animated.timing(backdropOpacity, {
-          toValue: 0,
-          duration: 180,
-          useNativeDriver: true,
-        }),
-      ]).start(({ finished }) => {
-        if (finished) setMounted(false);
-      });
-    }
-  }, [visible]);
-
-  if (!mounted && !visible) return null;
-
-  return (
-    <Modal
-      visible={mounted || visible}
-      transparent
-      animationType="none"
-      onRequestClose={onClose}
-      statusBarTranslucent
-    >
-      <Animated.View
-        style={{
-          flex: 1,
-          backgroundColor: "rgba(0,0,0,0.6)",
-          opacity: backdropOpacity,
-        }}
-        pointerEvents={visible ? "auto" : "none"}
-      >
-        <TouchableOpacity
-          style={{ flex: 1 }}
-          onPress={onClose}
-          activeOpacity={1}
-          accessibilityLabel="Close menu"
-        />
-      </Animated.View>
-
-      <Animated.View
-        style={{
-          position: "absolute",
-          bottom: 0,
-          left: 0,
-          right: 0,
-          backgroundColor: "#1A1A1A",
-          borderTopLeftRadius: 20,
-          borderTopRightRadius: 20,
-          paddingBottom: 36,
-          transform: [{ translateY }],
-        }}
-      >
-        <View style={{ alignItems: "center", paddingVertical: 12 }}>
-          <View
-            style={{
-              width: 36,
-              height: 4,
-              borderRadius: 2,
-              backgroundColor: "#444",
-            }}
-          />
-        </View>
-
-        {track && (
-          <View
-            style={{
-              flexDirection: "row",
-              alignItems: "center",
-              paddingHorizontal: 20,
-              paddingBottom: 16,
-              borderBottomWidth: 1,
-              borderBottomColor: "#2A2A2A",
-              marginBottom: 8,
-            }}
-          >
-            {track.coverUrl ? (
-              <Image
-                source={{ uri: track.coverUrl }}
-                style={{
-                  width: 48,
-                  height: 48,
-                  borderRadius: 6,
-                  marginRight: 12,
-                }}
-              />
-            ) : (
-              <View
-                style={{
-                  width: 48,
-                  height: 48,
-                  borderRadius: 6,
-                  backgroundColor: "#2A2A2A",
-                  marginRight: 12,
-                  alignItems: "center",
-                  justifyContent: "center",
-                }}
-              >
-                <Ionicons name="musical-note" size={20} color="#555" />
-              </View>
-            )}
-            <View style={{ flex: 1 }}>
-              <Text
-                style={{ color: "white", fontSize: 15, fontWeight: "700" }}
-                numberOfLines={1}
-              >
-                {track.title}
-              </Text>
-              <Text
-                style={{ color: "#888", fontSize: 13, marginTop: 2 }}
-                numberOfLines={1}
-              >
-                {track.artist.name}
-              </Text>
-            </View>
-          </View>
-        )}
-
-        {actions.map((action) => (
-          <TouchableOpacity
-            key={action.label}
-            onPress={() => {
-              onClose();
-              setTimeout(action.onPress, 200);
-            }}
-            style={{
-              flexDirection: "row",
-              alignItems: "center",
-              paddingHorizontal: 20,
-              paddingVertical: 14,
-            }}
-            accessibilityRole="button"
-            accessibilityLabel={action.label}
-          >
-            <Ionicons
-              name={action.icon as any}
-              size={22}
-              color={action.color ?? "#B3B3B3"}
-              style={{ marginRight: 16, width: 24 }}
-            />
-            <Text
-              style={{
-                color: action.color ?? "white",
-                fontSize: 15,
-                fontWeight: "500",
-              }}
-            >
-              {action.label}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </Animated.View>
-    </Modal>
-  );
-}
 
 // ─── Skeleton row ─────────────────────────────────────────────────────────────
 
@@ -480,44 +270,6 @@ export default function HomeScreen() {
     [likedIds],
   );
 
-  // ── Build actions ───────────────────────────────────────────────────────────
-
-  const buildActions = (track: Track): TrackAction[] => {
-    const trackIsLiked = likedIds.has(track.id);
-    return [
-      {
-        icon: "play-skip-forward-outline",
-        label: "Play next",
-        onPress: () => addToQueueNext(track),
-      },
-      {
-        icon: "add-circle-outline",
-        label: "Add to queue",
-        onPress: () => addToQueue(track),
-      },
-      {
-        icon: trackIsLiked ? "heart" : "heart-outline",
-        label: trackIsLiked ? "Remove from liked songs" : "Add to liked songs",
-        color: trackIsLiked ? "#1DB954" : undefined,
-        onPress: () => handleLikeToggle(track),
-      },
-      {
-        icon: "list-outline",
-        label: "Add to playlist",
-        // ── CHANGED: open modal instead of Alert ────────────────────────────
-        onPress: () => {
-          setPlaylistTrackId(track.id);
-          setPlaylistModalVisible(true);
-        },
-      },
-      {
-        icon: "download-outline",
-        label: "Download",
-        onPress: () => Alert.alert("Download", "Coming soon"),
-      },
-    ];
-  };
-
   // ── Render ──────────────────────────────────────────────────────────────────
 
   return (
@@ -553,7 +305,7 @@ export default function HomeScreen() {
           onRetry={loadForYou}
           currentTrackId={currentTrack?.id ?? null}
           onTrackPress={playTrack}
-          onTrackLongPress={handleLongPress}  
+          onTrackLongPress={handleLongPress}
         />
 
         <Section
@@ -571,11 +323,18 @@ export default function HomeScreen() {
       </ScrollView>
 
       {/* Track action sheet */}
-      <TrackActionSheet
+      <TrackActionsSheet
         track={selectedTrack}
         visible={sheetVisible}
         onClose={() => setSheetVisible(false)}
-        actions={selectedTrack ? buildActions(selectedTrack) : []}
+        isLiked={selectedTrack ? likedIds.has(selectedTrack.id) : false}
+        onToggleLike={handleLikeToggle}
+        onPlayNext={addToQueueNext}
+        onAddToQueue={addToQueue}
+        onAddToPlaylist={(track) => {
+          setPlaylistTrackId(track.id);
+          setPlaylistModalVisible(true);
+        }}
       />
 
       {/* Add to playlist modal — NEW */}

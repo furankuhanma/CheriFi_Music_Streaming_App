@@ -249,14 +249,15 @@ export default function RegisterScreen() {
         {/* Register button */}
         <TouchableOpacity
           onPress={handleRegister}
-          disabled={isLoadingAuth}
+          disabled={isLoadingAuth || (authError?.includes("rate") ?? false)}
           style={{
             backgroundColor: "#1DB954",
             borderRadius: 30,
             paddingVertical: 15,
             alignItems: "center",
             marginTop: 24,
-            opacity: isLoadingAuth ? 0.7 : 1,
+            opacity:
+              isLoadingAuth || (authError?.includes("rate") ?? false) ? 0.5 : 1,
           }}
           accessibilityRole="button"
           accessibilityLabel="Create account"

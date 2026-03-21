@@ -16,6 +16,10 @@ export type PlaylistTrack = {
     coverUrl: string | null;
     artist: { id: string; name: string };
     album: { id: string; title: string } | null;
+    genre?: string | null;
+    playCount?: number;
+    isLiked?: boolean;
+    inLibrary?: boolean;
   };
 };
 
@@ -31,6 +35,12 @@ export type Playlist = {
   tracks: PlaylistTrack[];
 };
 
+export type UpdatePlaylistPayload = {
+  title?: string;
+  description?: string | null;
+  coverUrl?: string | null;
+};
+
 // ─── Service ──────────────────────────────────────────────────────────────────
 
 export const PlaylistsService = {
@@ -44,11 +54,27 @@ export const PlaylistsService = {
     return res.data!;
   },
 
-  async create(title: string, description?: string): Promise<Playlist> {
+  async create(
+    title: string,
+    description?: string,
+    coverUrl?: string | null,
+  ): Promise<Playlist> {
     const res = await api.post<{ success: boolean; data: Playlist }>("/playlists", {
       title,
       description,
+      coverUrl,
     });
+    return res.data!;
+  },
+
+  async update(
+    playlistId: string,
+    payload: UpdatePlaylistPayload,
+  ): Promise<Playlist> {
+    const res = await api.patch<{ success: boolean; data: Playlist }>(
+      `/playlists/${playlistId}`,
+      payload,
+    );
     return res.data!;
   },
 

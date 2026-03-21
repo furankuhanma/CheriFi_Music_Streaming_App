@@ -22,6 +22,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTrackTransition } from "../hooks/useTrackTransition";
 import QueueSheet from "./QueueSheet";
 import AddToPlaylistModal from "./AddToPlaylistModal"; // ← NEW
+import { useOffline } from "../context/OfflineContext";
 
 const SCREEN_HEIGHT = Dimensions.get("window").height;
 const DISMISS_THRESHOLD = 120;
@@ -86,6 +87,7 @@ export default function ExpandedPlayer() {
     isLiked,
     toggleLike,
   } = usePlayer();
+  const { getDownloadItem, toggleTrackDownload } = useOffline();
 
   const insets = useSafeAreaInsets();
 
@@ -212,6 +214,9 @@ export default function ExpandedPlayer() {
   }, []);
 
   if (!currentTrack) return null;
+
+  const downloadItem = getDownloadItem(currentTrack.id);
+  const isDownloaded = downloadItem?.status === "downloaded";
 
   const displayPosition = isSeeking ? seekPosition : playbackPosition;
   const progress = duration > 0 ? (displayPosition / duration) * 100 : 0;
@@ -677,12 +682,18 @@ export default function ExpandedPlayer() {
             accessibilityHint="Double tap to add this track to a playlist"
           />
           <IconButton
-            name="download-outline"
+            name={isDownloaded ? "checkmark-circle" : "download-outline"}
             size={22}
-            color="#B3B3B3"
-            onPress={() => Alert.alert("Download", "Coming soon")}
-            accessibilityLabel="Download track"
-            accessibilityHint="Double tap to download this track for offline listening"
+            color={isDownloaded ? "#1DB954" : "#B3B3B3"}
+            onPress={() => toggleTrackDownload(currentTrack)}
+            accessibilityLabel={
+              isDownloaded ? "Remove downloaded track" : "Download track"
+            }
+            accessibilityHint={
+              isDownloaded
+                ? "Double tap to remove this downloaded track"
+                : "Double tap to download this track for offline listening"
+            }
           />
           <IconButton
             name="mic-outline"

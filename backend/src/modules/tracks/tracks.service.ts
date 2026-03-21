@@ -38,6 +38,61 @@ const trackInclude = {
 // ─── Tracks service ───────────────────────────────────────────────────────────
 
 export const TracksService = {
+  async getDownloads(userId: string, limit = 100): Promise<TrackDto[]> {
+    const rows = await prisma.libraryTrack.findMany({
+      where: { userId },
+      orderBy: { addedAt: "desc" },
+      take: limit,
+      include: {
+        track: {
+          include: trackInclude,
+        },
+      },
+    });
+
+    return rows.map((row) => formatTrack(row.track, userId));
+  },
+
+  async getLiked(userId: string, limit = 100): Promise<TrackDto[]> {
+    const rows = await prisma.like.findMany({
+      where: { userId },
+      orderBy: { createdAt: "desc" },
+      take: limit,
+      include: {
+        track: {
+          include: trackInclude,
+        },
+      },
+    });
+
+    return rows.map((row) => formatTrack(row.track, userId));
+  },
+
+  async getRecentlyPlayed(userId: string, limit = 100): Promise<TrackDto[]> {
+    const rows = await prisma.playHistory.findMany({
+      where: { userId },
+      orderBy: { playedAt: "desc" },
+      take: Math.max(limit * 3, limit),
+      include: {
+        track: {
+          include: trackInclude,
+        },
+      },
+    });
+
+    const seen = new Set<string>();
+    const uniqueTracks: TrackDto[] = [];
+
+    for (const row of rows) {
+      if (seen.has(row.trackId)) continue;
+      seen.add(row.trackId);
+      uniqueTracks.push(formatTrack(row.track, userId));
+      if (uniqueTracks.length >= limit) break;
+    }
+
+    return uniqueTracks;
+  },
+
   async getAll(userId?: string, page = 1, limit = 20) {
     const skip = (page - 1) * limit;
 
@@ -121,7 +176,24 @@ export const TracksService = {
   },
 
   async recordPlay(trackId: string, userId: string) {
-    await prisma.playHistory.create({ data: { trackId, userId } });
+    await prisma.$transaction(async (tx) => {
+      await tx.playHistory.deleteMany({ where: { userId, trackId } });
+
+      await tx.playHistory.create({ data: { trackId, userId } });
+
+      const overflow = await tx.playHistory.findMany({
+        where: { userId },
+        orderBy: { playedAt: "desc" },
+        skip: 100,
+        select: { id: true },
+      });
+
+      if (overflow.length > 0) {
+        await tx.playHistory.deleteMany({
+          where: { id: { in: overflow.map((row) => row.id) } },
+        });
+      }
+    });
   },
 
   async like(trackId: string, userId: string) {

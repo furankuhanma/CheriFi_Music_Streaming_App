@@ -43,6 +43,13 @@ const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 20,
   message: { success: false, error: "Too many auth attempts, please try again later" },
+  skip: (req) => {
+    // Don't count passive session probes or refresh token housekeeping
+    // as brute-force auth attempts.
+    if (req.path === "/me") return true;
+    if (req.path === "/refresh") return true;
+    return false;
+  },
 });
 
 app.use(limiter);

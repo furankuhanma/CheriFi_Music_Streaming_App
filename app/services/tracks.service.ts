@@ -38,6 +38,11 @@ type TrackResponse = {
   data: Track;
 };
 
+type TrackListResponse = {
+  success: boolean;
+  data: Track[];
+};
+
 // ─── Tracks service ───────────────────────────────────────────────────────────
 
 export const TracksService = {
@@ -47,6 +52,23 @@ export const TracksService = {
 
   async getById(trackId: string): Promise<Track> {
     const res = await api.get<TrackResponse>(`/tracks/${trackId}`);
+    return res.data;
+  },
+
+  async getDownloads(limit = 100): Promise<Track[]> {
+    const res = await api.get<TrackListResponse>(`/tracks/downloads?limit=${limit}`);
+    return res.data;
+  },
+
+  async getLiked(limit = 100): Promise<Track[]> {
+    const res = await api.get<TrackListResponse>(`/tracks/liked?limit=${limit}`);
+    return res.data;
+  },
+
+  async getRecentlyPlayed(limit = 100): Promise<Track[]> {
+    const res = await api.get<TrackListResponse>(
+      `/tracks/recently-played?limit=${limit}`,
+    );
     return res.data;
   },
 

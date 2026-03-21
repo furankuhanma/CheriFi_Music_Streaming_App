@@ -20,6 +20,15 @@ function auth(handler: Handler) {
 
 // ─── Routes ───────────────────────────────────────────────────────────────────
 
+// Real user library feeds — require auth
+router.get("/downloads", requireAuth as any, auth(TracksController.getDownloads));
+router.get("/liked", requireAuth as any, auth(TracksController.getLiked));
+router.get(
+  "/recently-played",
+  requireAuth as any,
+  auth(TracksController.getRecentlyPlayed),
+);
+
 // List all tracks — optional auth to include isLiked/inLibrary
 router.get("/", optionalAuth as any, auth(TracksController.getAll));
 

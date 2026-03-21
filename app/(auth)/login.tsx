@@ -243,18 +243,21 @@ export default function LoginScreen() {
         {/* Login button */}
         <TouchableOpacity
           onPress={handleLogin}
-          disabled={isLoadingAuth}
+          disabled={isLoadingAuth || (authError?.includes("rate") ?? false)}
           style={{
             backgroundColor: "#1DB954",
             borderRadius: 30,
             paddingVertical: 15,
             alignItems: "center",
             marginTop: 24,
-            opacity: isLoadingAuth ? 0.7 : 1,
+            opacity:
+              isLoadingAuth || (authError?.includes("rate") ?? false) ? 0.5 : 1,
           }}
           accessibilityRole="button"
           accessibilityLabel="Sign in"
-          accessibilityState={{ disabled: isLoadingAuth }}
+          accessibilityState={{
+            disabled: isLoadingAuth || (authError?.includes("rate") ?? false),
+          }}
         >
           {isLoadingAuth ? (
             <ActivityIndicator color="black" />

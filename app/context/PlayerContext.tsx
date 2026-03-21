@@ -35,6 +35,7 @@ import TrackPlayer, {
 } from "react-native-track-player";
 import { RecommendationsService } from "../services/recommendations.service";
 import { TracksService } from "../services/tracks.service";
+import { OfflineService } from "../services/offline.service";
 
 export const MINI_PLAYER_HEIGHT = 70;
 export const SCREEN_HEIGHT = Dimensions.get("window").height;
@@ -116,10 +117,11 @@ type PlayerContextType = {
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 /** Map our app Track → RNTP AddTrack (all playback metadata for the notification). */
-function toRNTPTrack(track: Track): AddTrack {
+async function toRNTPTrack(track: Track): Promise<AddTrack> {
+  const localUri = await OfflineService.resolvePlayableUri(track.id);
   return {
     id: track.id,
-    url: TracksService.streamUrl(track.id),
+    url: localUri ?? TracksService.streamUrl(track.id),
     title: track.title,
     artist: track.artist.name,
     artwork: track.coverUrl ?? undefined,
@@ -163,6 +165,23 @@ const classifyError = (error: unknown): PlaybackErrorType => {
 
   return "load_failed";
 };
+
+async function canReachBackend(trackId: string): Promise<boolean> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 2500);
+  try {
+    // 404 still means the network path is reachable; throw only on true network failures.
+    await fetch(TracksService.streamUrl(trackId), {
+      method: "HEAD",
+      signal: controller.signal,
+    });
+    return true;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
 
 // ─── Persistence helpers ──────────────────────────────────────────────────────
 
@@ -443,7 +462,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       currentIndexRef.current = 0;
       setCurrentTrack(tracks[0]);
 
-      await TrackPlayer.setQueue(tracks.map(toRNTPTrack));
+      await TrackPlayer.setQueue(await Promise.all(tracks.map(toRNTPTrack)));
       // Do NOT auto-play — user should press Play
       setIsInitialized(true);
     } catch (error) {
@@ -540,7 +559,9 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
           currentIndexRef.current = index;
           setCurrentTrack(savedQueue[index]);
 
-          await TrackPlayer.setQueue(savedQueue.map(toRNTPTrack));
+          await TrackPlayer.setQueue(
+            await Promise.all(savedQueue.map(toRNTPTrack)),
+          );
           // skip() positions us at the saved track and seeks to the saved time
           await TrackPlayer.skip(index, savedPosMs / 1000);
           await TrackPlayer.setRepeatMode(mapRepeatMode(repeat));
@@ -675,6 +696,27 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   }, [position]);
 
   const playTrack = useCallback(async (track: Track) => {
+    try {
+      const localUri = await OfflineService.resolvePlayableUri(track.id);
+      let canReach = true;
+      if (!localUri) {
+        try {
+          canReach = await canReachBackend(track.id);
+        } catch {
+          canReach = false;
+        }
+      }
+      const offlineNoLocal = !localUri && !canReach;
+      if (offlineNoLocal) {
+        setPlaybackError("network");
+        return;
+      }
+    } catch (error) {
+      console.error("[PlayerContext] Error checking offline state:", error);
+      setPlaybackError("load_failed");
+      return;
+    }
+
     let q = queueRef.current;
     let idx = q.findIndex((t) => t.id === track.id);
 
@@ -685,7 +727,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       idx = nextQueue.length - 1;
       queueRef.current = nextQueue;
       setQueue(nextQueue);
-      await TrackPlayer.add(toRNTPTrack(track));
+      await TrackPlayer.add(await toRNTPTrack(track));
       q = nextQueue;
     }
 
@@ -725,7 +767,9 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       if (prev.find((t) => t.id === track.id)) return prev;
       const next = [...prev, track];
       queueRef.current = next;
-      TrackPlayer.add(toRNTPTrack(track));
+      void (async () => {
+        await TrackPlayer.add(await toRNTPTrack(track));
+      })();
       return next;
     });
   }, []);
@@ -750,7 +794,9 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         const adjustedTo = existingIdx < insertAt ? insertAt - 1 : insertAt;
         TrackPlayer.move(existingIdx, adjustedTo);
       } else {
-        TrackPlayer.add(toRNTPTrack(track), insertAt);
+        void (async () => {
+          await TrackPlayer.add(await toRNTPTrack(track), insertAt);
+        })();
       }
 
       return next;
@@ -809,11 +855,13 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     setQueue(newQueue);
     setCurrentTrack(newQueue[0]);
 
-    TrackPlayer.setQueue(newQueue.map(toRNTPTrack)).then(async () => {
-      await TrackPlayer.play();
-      setLiveState(State.Playing);
-      TracksService.recordPlay(newQueue[0].id);
-    });
+    Promise.all(newQueue.map(toRNTPTrack)).then((rntpQueue) =>
+      TrackPlayer.setQueue(rntpQueue).then(async () => {
+        await TrackPlayer.play();
+        setLiveState(State.Playing);
+        TracksService.recordPlay(newQueue[0].id);
+      }),
+    );
   }, []);
 
   // ── Like / Unlike ─────────────────────────────────────────────────────────

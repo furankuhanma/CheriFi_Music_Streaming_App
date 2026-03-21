@@ -45,13 +45,40 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     (async () => {
       try {
         const loggedIn = await AuthStore.isLoggedIn();
-        if (!loggedIn) return;
-        const me = await AuthService.me();
-        setUser(me);
-      } catch (err) {
-        await AuthStore.clearTokens();
-        // If it's a 401, tokens are gone — user must log in again (already handled)
-        // No need to surface error, just fall through to login screen
+        if (!loggedIn) {
+          setIsLoadingAuth(false);
+          return;
+        }
+
+        // Skip session restore if token might be expired or invalid
+        // This prevents hitting rate limits on app startup
+        const accessToken = await AuthStore.getAccessToken();
+        if (!accessToken) {
+          await AuthStore.clearTokens();
+          setIsLoadingAuth(false);
+          return;
+        }
+
+        // Add significant delay before checking session to avoid rate limits
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+
+        try {
+          const me = await AuthService.me();
+          setUser(me);
+        } catch (err) {
+          // Only clear tokens on actual auth failures (401/403).
+          // Network errors (offline, timeout) should NOT log the user out —
+          // they still have valid tokens and should stay logged in.
+          const isAuthError =
+            err instanceof ApiError &&
+            (err.status === 401 || err.status === 403);
+          if (isAuthError) {
+            await AuthStore.clearTokens();
+          }
+          // For any other error (network down, timeout, 5xx), we silently
+          // keep the user's session intact. They will be shown cached/offline
+          // content and can retry when connectivity is restored.
+        }
       } finally {
         setIsLoadingAuth(false);
       }

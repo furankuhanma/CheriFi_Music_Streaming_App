@@ -24,6 +24,7 @@ function auth(handler: Handler) {
 router.get("/", requireAuth as any, auth(PlaylistsController.getAll));
 router.get("/:id", requireAuth as any, auth(PlaylistsController.getById));
 router.post("/", requireAuth as any, auth(PlaylistsController.create));
+router.patch("/:id", requireAuth as any, auth(PlaylistsController.update));
 router.delete("/:id", requireAuth as any, auth(PlaylistsController.delete));
 
 router.post("/:id/tracks", requireAuth as any, auth(PlaylistsController.addTrack));

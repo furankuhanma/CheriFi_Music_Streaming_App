@@ -44,9 +44,34 @@ export const PlaylistsService = {
     });
   },
 
-  async create(userId: string, title: string, description?: string) {
+  async create(
+    userId: string,
+    title: string,
+    description?: string,
+    coverUrl?: string | null,
+  ) {
     return prisma.playlist.create({
-      data: { userId, title, description, isPublic: false },
+      data: { userId, title, description, coverUrl, isPublic: false },
+    });
+  },
+
+  async update(
+    playlistId: string,
+    userId: string,
+    data: {
+      title?: string;
+      description?: string | null;
+      coverUrl?: string | null;
+    },
+  ) {
+    const playlist = await prisma.playlist.findFirst({
+      where: { id: playlistId, userId },
+    });
+    if (!playlist) return null;
+
+    return prisma.playlist.update({
+      where: { id: playlistId },
+      data,
     });
   },
 
