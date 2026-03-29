@@ -50,7 +50,7 @@ export const AuthService = {
 
     const user = await prisma.user.create({
       data: { email, username, passwordHash },
-      select: { id: true, email: true, username: true, displayName: true },
+      select: { id: true, email: true, username: true, displayName: true, avatarUrl: true },
     });
 
     const payload: JwtPayload = { userId: user.id, email: user.email };
@@ -80,8 +80,9 @@ export const AuthService = {
       user: {
         id: user.id,
         email: user.email,
-        username: user.username,
-        displayName: user.displayName,
+        username: user.username || undefined,
+        displayName: user.displayName || undefined,
+        avatarUrl: user.avatarUrl || undefined,
       },
       accessToken,
       refreshToken,
@@ -178,8 +179,9 @@ export const AuthService = {
       user: {
         id: user.id,
         email: user.email,
-        username: user.username,
-        displayName: user.displayName,
+        username: user.username || undefined,
+        displayName: user.displayName || undefined,
+        avatarUrl: user.avatarUrl || undefined,
       },
       accessToken,
       refreshToken,

@@ -1,10 +1,11 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useRef } from "react";
 import { View, Text, Image, Pressable } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import Animated, {
   useAnimatedStyle,
   useSharedValue,
   withTiming,
+  runOnJS,
 } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useDownload, DownloadNotification } from "../context/DownloadContext";
@@ -48,25 +49,45 @@ function NotificationItem({
 }: NotificationItemProps) {
   const translateY = useSharedValue(200);
 
+  // Keep a stable ref to onDismiss so the effect doesn't re-fire
+  // when the parent re-renders and creates a new function reference
+  const onDismissRef = useRef(onDismiss);
+  useEffect(() => {
+    onDismissRef.current = onDismiss;
+  }, [onDismiss]);
+
   useEffect(() => {
     // Slide in animation
     translateY.value = withTiming(0, { duration: 300 });
 
-    // Auto-dismiss
+    // Stable dismissal function that always calls the latest onDismiss
+    const dismiss = () => onDismissRef.current();
+
+    // Auto-dismiss: slide out, then call dismiss via runOnJS
+    // runOnJS is required because withTiming callbacks run on the UI
+    // thread (worklet context) and cannot directly call JS functions
     const timer = setTimeout(() => {
       translateY.value = withTiming(200, { duration: 300 }, () => {
-        onDismiss();
+        runOnJS(dismiss)();
       });
     }, notification.dismissAfter ?? 3000);
 
     return () => clearTimeout(timer);
-  }, [notification.id, notification.dismissAfter, translateY, onDismiss]);
+  }, [notification.id, notification.dismissAfter, translateY]);
 
   const animatedStyle = useAnimatedStyle(() => {
     return {
       transform: [{ translateY: translateY.value }],
     };
   }, []);
+
+  // Safe manual dismiss — also needs runOnJS if triggered from a worklet,
+  // but since Pressable onPress runs on JS thread this is fine as-is
+  const handleManualDismiss = () => {
+    translateY.value = withTiming(200, { duration: 300 }, () => {
+      runOnJS(onDismissRef.current)();
+    });
+  };
 
   return (
     <Animated.View
@@ -109,8 +130,8 @@ function NotificationItem({
           </Text>
         </View>
 
-        {/* Close button */}
-        <Pressable onPress={onDismiss} hitSlop={8}>
+        {/* Close button — uses animated slide-out before dismissing */}
+        <Pressable onPress={handleManualDismiss} hitSlop={8}>
           <Ionicons name="close" size={20} color="white" />
         </Pressable>
       </View>

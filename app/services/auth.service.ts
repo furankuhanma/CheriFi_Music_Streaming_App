@@ -6,7 +6,7 @@ import { AuthStore } from "../../stores/auth.store";
 export type AuthUser = {
   id: string;
   email: string;
-  username: string;
+  username?: string | null;
   displayName?: string | null;
   avatarUrl?: string | null;
 };
@@ -80,7 +80,14 @@ export const AuthService = {
    */
   async me(): Promise<AuthUser> {
     const res = await api.get<MeResponse>("/auth/me");
-    return res.data;
+    const user = res.data;
+    return {
+      id: user.id,
+      email: user.email,
+      username: user.username || undefined,
+      displayName: user.displayName || undefined,
+      avatarUrl: user.avatarUrl || undefined,
+    };
   },
 
   /**

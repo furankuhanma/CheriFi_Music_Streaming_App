@@ -260,6 +260,11 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const isSetupDoneRef = useRef(false);
   const isRefillInProgressRef = useRef(false);
 
+  // Mirrors the latest RNTP position (seconds) without causing re-renders.
+  // Used by the persist effect so playbackPosition is NOT a dependency there,
+  // preventing the "Maximum update depth exceeded" loop during downloads.
+  const positionRef = useRef(0);
+
   // ── State ─────────────────────────────────────────────────────────────────
   const [queue, setQueue] = useState<Track[]>([]);
   const [currentTrack, setCurrentTrack] = useState<Track | null>(null);
@@ -272,6 +277,11 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
   // ── RNTP progress ─────────────────────────────────────────────────────────
   const { position, duration: rnDuration } = useProgress(200);
+
+  // Keep positionRef in sync every tick without adding position to persist deps
+  useEffect(() => {
+    positionRef.current = position;
+  }, [position]);
 
   // ── Polled playback state ─────────────────────────────────────────────────
   const [liveState, setLiveState] = useState<State | undefined>(undefined);
@@ -346,6 +356,11 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   }, [currentTrack?.id]);
 
   // ── Persist state (debounced 2s) ──────────────────────────────────────────
+  // FIX: playbackPosition is intentionally NOT in the dependency array.
+  // It updates every 200 ms via useProgress, which caused this effect to
+  // fire constantly and trigger "Maximum update depth exceeded" during
+  // downloads. We read the latest position from positionRef.current instead,
+  // which is kept in sync via a separate lightweight effect above.
   useEffect(() => {
     if (!isInitialized || queue.length === 0) return;
 
@@ -355,7 +370,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       savePlayerState(
         queue,
         currentIndexRef.current,
-        playbackPosition,
+        positionRef.current * 1000, // seconds → ms, read from ref not state
         isShuffle,
         repeatMode,
       );
@@ -364,16 +379,16 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     return () => {
       if (persistTimerRef.current) clearTimeout(persistTimerRef.current);
     };
-  }, [queue, playbackPosition, isShuffle, repeatMode, isInitialized]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queue, isShuffle, repeatMode, isInitialized]);
 
   // ── Queue health: auto-refill when running low ────────────────────────────
   const ensureQueueHealth = useCallback(async () => {
-    // Guard against concurrent refills
     if (isRefillInProgressRef.current) return;
 
     const q = queueRef.current;
     const remaining = q.length - 1 - currentIndexRef.current;
-    if (remaining > 3) return; // plenty left, nothing to do
+    if (remaining > 3) return;
 
     isRefillInProgressRef.current = true;
     try {
@@ -397,18 +412,14 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   useTrackPlayerEvents(
     [Event.PlaybackActiveTrackChanged, Event.PlaybackError],
     async (event) => {
-      // ── Track changed ────────────────────────────────────────────────────
       if (event.type === Event.PlaybackActiveTrackChanged) {
         const { index } = event;
         if (index === undefined || index === null) return;
-
-        // Skip if we triggered this change ourselves
         if (index === currentIndexRef.current) return;
 
         const q = queueRef.current;
 
         if (isShuffleRef.current) {
-          // RNTP auto-advanced sequentially; override with a random track
           const total = q.length;
           if (total <= 1) return;
 
@@ -425,7 +436,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
             TracksService.recordPlay(next.id);
           }
         } else {
-          // Normal sequential advance
           currentIndexRef.current = index;
           const next = q[index];
           if (next) {
@@ -434,11 +444,9 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
           }
         }
 
-        // Refill queue if running low after every track change
         void ensureQueueHealth();
       }
 
-      // ── Playback error ────────────────────────────────────────────────────
       if (event.type === Event.PlaybackError) {
         setPlaybackError(classifyError(event.message));
       }
@@ -693,7 +701,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       let idx = q.findIndex((t) => t.id === track.id);
 
       if (idx === -1) {
-        // Track not in queue — append it and ensure the queue gets filled around it
         const nextQueue = [...q, track];
         idx = nextQueue.length - 1;
         queueRef.current = nextQueue;
@@ -710,7 +717,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       setLiveState(State.Playing);
       TracksService.recordPlay(track.id);
 
-      // Always check queue health after playing a track from search
       void ensureQueueHealth();
     },
     [ensureQueueHealth],
@@ -806,7 +812,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  // ── loadAndPlay: replace queue and start playing from a given index ─────────
+  // ── loadAndPlay: replace queue and start playing from a given index ────────
 
   const loadAndPlay = useCallback(
     async (tracks: Track[], startIndex: number) => {

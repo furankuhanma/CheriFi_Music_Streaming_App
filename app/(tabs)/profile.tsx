@@ -30,13 +30,20 @@ export default function ProfileScreen() {
   };
 
   console.log("PROFILE USER:", JSON.stringify(user, null, 2));
-  const displayName = user?.displayName ?? user?.username ?? "Your Name";
+
+  // Prioritize: displayName → username → email → "Your Name"
+  const displayName =
+    user?.displayName || user?.username || user?.email || "Your Name";
+
+  // Generate initials from the display name
   const initials = displayName
-    .split(" ")
+    .split(/[\s._-]+/)
+    .filter(Boolean)
     .map((w) => w[0])
     .join("")
     .toUpperCase()
-    .slice(0, 2);
+    .slice(0, 2)
+    .padEnd(2, "U");
 
   return (
     <SafeAreaView className="flex-1 bg-[#121212]">
