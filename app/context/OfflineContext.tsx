@@ -281,13 +281,10 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
       const timeout = setTimeout(() => controller.abort(), 2500);
 
       try {
-        const res = await fetch(
-          "https://frank-loui-lapore-hp-probook-640-g1.tail11c2e9.ts.net/health",
-          {
-            method: "GET",
-            signal: controller.signal,
-          },
-        );
+        const res = await fetch("http://192.168.114.7:3000/health", {
+          method: "GET",
+          signal: controller.signal,
+        });
         setIsOnline(res.ok);
       } catch {
         setIsOnline(false);

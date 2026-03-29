@@ -112,6 +112,7 @@ type PlayerContextType = {
   removeFromQueue: (trackId: string) => void;
   reorderQueue: (fromIndex: number, toIndex: number) => void;
   skipToTrack: (trackId: string) => void;
+  loadAndPlay: (tracks: Track[], startIndex: number) => Promise<void>;
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -125,7 +126,6 @@ async function toRNTPTrack(track: Track): Promise<AddTrack> {
     title: track.title,
     artist: track.artist.name,
     artwork: track.coverUrl ?? undefined,
-    /** Duration in seconds — RNTP's native unit. */
     duration: track.duration,
     genre: track.genre ?? undefined,
     album: track.album?.title,
@@ -170,7 +170,6 @@ async function canReachBackend(trackId: string): Promise<boolean> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 2500);
   try {
-    // 404 still means the network path is reachable; throw only on true network failures.
     await fetch(TracksService.streamUrl(trackId), {
       method: "HEAD",
       signal: controller.signal,
@@ -201,7 +200,6 @@ async function savePlayerState(
       [STORAGE_KEY_REPEAT, repeat],
     ]);
   } catch (e) {
-    // Non-critical — silently ignore persistence errors
     console.warn("Failed to persist player state:", e);
   }
 }
@@ -250,21 +248,19 @@ async function loadPlayerState(): Promise<RestoredState> {
 
 // ─── Context ──────────────────────────────────────────────────────────────────
 
-// ─── Context ──────────────────────────────────────────────────────────────────
-
 const PlayerContext = createContext<PlayerContextType | null>(null);
 
 export function PlayerProvider({ children }: { children: ReactNode }) {
-  // ── Refs (always current — safe inside event handlers & async callbacks) ──
+  // ── Refs ──────────────────────────────────────────────────────────────────
   const currentIndexRef = useRef(0);
   const repeatModeRef = useRef<RepeatMode>("off");
   const isShuffleRef = useRef(false);
-  /** Shadow of the queue state — avoids stale closures in RNTP event handlers. */
   const queueRef = useRef<Track[]>([]);
   const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isSetupDoneRef = useRef(false);
+  const isRefillInProgressRef = useRef(false);
 
-  // ── React state (drives UI) ───────────────────────────────────────────────
+  // ── State ─────────────────────────────────────────────────────────────────
   const [queue, setQueue] = useState<Track[]>([]);
   const [currentTrack, setCurrentTrack] = useState<Track | null>(null);
   const [isExpanded, setIsExpanded] = useState(false);
@@ -274,28 +270,14 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const [playbackError, setPlaybackError] = useState<PlaybackErrorType>(null);
   const [isLiked, setIsLiked] = useState(false);
 
-  // ── RNTP reactive hooks ───────────────────────────────────────────────────
-  /**
-   * useProgress polls RNTP every 200 ms.
-   * position and duration are in **seconds** — multiplied ×1000 before
-   * exposing them so the public API stays in milliseconds.
-   */
+  // ── RNTP progress ─────────────────────────────────────────────────────────
   const { position, duration: rnDuration } = useProgress(200);
 
   // ── Polled playback state ─────────────────────────────────────────────────
-  /**
-   * usePlaybackState() / Event.PlaybackState use NativeEventEmitter internally,
-   * which is unreliable on the New Architecture (TurboModules). Direct
-   * imperative calls (getPlaybackState, play, pause) work fine, so we poll
-   * every 250 ms instead. play/pause/togglePlay also write liveState
-   * synchronously (optimistic update) so the button icon flips instantly
-   * without waiting for the next tick.
-   */
   const [liveState, setLiveState] = useState<State | undefined>(undefined);
 
   useEffect(() => {
     let active = true;
-    // Seed immediately on mount so the first render already reflects reality.
     TrackPlayer.getPlaybackState()
       .then(({ state }) => {
         if (active) setLiveState(state as State);
@@ -315,13 +297,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  // ── Active-track sync when app returns to foreground ──────────────────────
-  /**
-   * When the user changes tracks via notification controls while the app is
-   * backgrounded, the PlaybackActiveTrackChanged event may have been missed.
-   * Whenever the app comes back to the foreground we do a one-shot reconcile
-   * so the in-app UI always matches what's playing.
-   */
+  // ── Foreground reconcile ──────────────────────────────────────────────────
   useEffect(() => {
     const handleAppStateChange = async (nextState: string) => {
       if (nextState !== "active") return;
@@ -346,17 +322,14 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     return () => sub.remove();
   }, []);
 
-  // ── Derived playback booleans ─────────────────────────────────────────────
+  // ── Derived ───────────────────────────────────────────────────────────────
   const isPlaying = liveState === State.Playing;
   const isLoading =
     liveState === State.Loading || liveState === State.Buffering;
-
-  /** Playback position exposed to consumers, in milliseconds. */
   const playbackPosition = position * 1000;
-  /** Track duration exposed to consumers, in milliseconds. */
   const duration = rnDuration * 1000;
 
-  // ── Keep ref mirrors up-to-date ───────────────────────────────────────────
+  // ── Ref mirrors ───────────────────────────────────────────────────────────
   useEffect(() => {
     queueRef.current = queue;
   }, [queue]);
@@ -367,12 +340,12 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     repeatModeRef.current = repeatMode;
   }, [repeatMode]);
 
-  // ── Like state follows the current track ─────────────────────────────────
+  // ── Like state follows current track ──────────────────────────────────────
   useEffect(() => {
     setIsLiked(currentTrack?.isLiked ?? false);
   }, [currentTrack?.id]);
 
-  // ── Persist state (debounced 2 s) ─────────────────────────────────────────
+  // ── Persist state (debounced 2s) ──────────────────────────────────────────
   useEffect(() => {
     if (!isInitialized || queue.length === 0) return;
 
@@ -393,20 +366,43 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     };
   }, [queue, playbackPosition, isShuffle, repeatMode, isInitialized]);
 
-  // ── RNTP event listeners ───────────────────────────────────────────────────
-  /**
-   * useTrackPlayerEvents uses a savedHandler ref internally so the inline
-   * handler always sees fresh refs without stale-closure risk.
-   */
+  // ── Queue health: auto-refill when running low ────────────────────────────
+  const ensureQueueHealth = useCallback(async () => {
+    // Guard against concurrent refills
+    if (isRefillInProgressRef.current) return;
+
+    const q = queueRef.current;
+    const remaining = q.length - 1 - currentIndexRef.current;
+    if (remaining > 3) return; // plenty left, nothing to do
+
+    isRefillInProgressRef.current = true;
+    try {
+      const res = await TracksService.getAll(1, 30);
+      const existing = new Set(q.map((t) => t.id));
+      const fresh = res.tracks.filter((t) => !existing.has(t.id));
+      if (fresh.length === 0) return;
+
+      const nextQueue = [...q, ...fresh];
+      queueRef.current = nextQueue;
+      setQueue(nextQueue);
+      await TrackPlayer.add(await Promise.all(fresh.map(toRNTPTrack)));
+    } catch {
+      // Non-critical — silently ignore
+    } finally {
+      isRefillInProgressRef.current = false;
+    }
+  }, []);
+
+  // ── RNTP event listeners ──────────────────────────────────────────────────
   useTrackPlayerEvents(
     [Event.PlaybackActiveTrackChanged, Event.PlaybackError],
     async (event) => {
-      // ── Track changed (auto-advance, notification next/previous) ──────────
+      // ── Track changed ────────────────────────────────────────────────────
       if (event.type === Event.PlaybackActiveTrackChanged) {
         const { index } = event;
         if (index === undefined || index === null) return;
 
-        // Skip if we triggered this change ourselves (index already updated)
+        // Skip if we triggered this change ourselves
         if (index === currentIndexRef.current) return;
 
         const q = queueRef.current;
@@ -429,7 +425,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
             TracksService.recordPlay(next.id);
           }
         } else {
-          // Normal sequential advance — accept RNTP's choice
+          // Normal sequential advance
           currentIndexRef.current = index;
           const next = q[index];
           if (next) {
@@ -437,6 +433,9 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
             TracksService.recordPlay(next.id);
           }
         }
+
+        // Refill queue if running low after every track change
+        void ensureQueueHealth();
       }
 
       // ── Playback error ────────────────────────────────────────────────────
@@ -463,7 +462,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       setCurrentTrack(tracks[0]);
 
       await TrackPlayer.setQueue(await Promise.all(tracks.map(toRNTPTrack)));
-      // Do NOT auto-play — user should press Play
       setIsInitialized(true);
     } catch (error) {
       console.error("fetchQueue failed:", error);
@@ -479,40 +477,22 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
     (async () => {
       try {
-        // setupPlayer throws if the native module is already initialised
-        // (e.g. after a JS hot reload). Catch that specific error and
-        // continue — everything else is a real failure worth re-throwing.
         try {
           await TrackPlayer.setupPlayer({
-            /**
-             * Android-only on-device audio cache.
-             * Caches up to 50 MB of audio data so previously-played segments
-             * are served locally without a second network round-trip.
-             */
             maxCacheSize: 1024 * 50,
-            /**
-             * Let RNTP pause/resume automatically when audio focus is
-             * lost/gained (phone calls, notifications, other apps).
-             */
             autoHandleInterruptions: true,
           });
         } catch (e: unknown) {
           const msg = e instanceof Error ? e.message : String(e);
           if (!msg.includes("already been initialized")) throw e;
-          // Player is already live — safe to continue with the rest of setup
         }
 
         await TrackPlayer.updateOptions({
           android: {
-            /**
-             * Stop playback and remove the notification when the user swipes
-             * the app away from recents.
-             */
             appKilledPlaybackBehavior:
               AppKilledPlaybackBehavior.StopPlaybackAndRemoveNotification,
             alwaysPauseOnInterruption: true,
           },
-          // Full capability set — expanded notification / lock screen
           capabilities: [
             Capability.Play,
             Capability.Pause,
@@ -521,13 +501,11 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
             Capability.SeekTo,
             Capability.Stop,
           ],
-          // Compact notification (Android) / lock-screen controls (iOS)
           compactCapabilities: [
             Capability.Play,
             Capability.Pause,
             Capability.SkipToNext,
           ],
-          // Android expanded notification
           notificationCapabilities: [
             Capability.Play,
             Capability.Pause,
@@ -538,7 +516,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
           progressUpdateEventInterval: 1,
         });
 
-        // ── Restore persisted session or fetch fresh queue ────────────────
         const restored = await loadPlayerState();
 
         if (restored && restored.queue.length > 0) {
@@ -562,10 +539,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
           await TrackPlayer.setQueue(
             await Promise.all(savedQueue.map(toRNTPTrack)),
           );
-          // skip() positions us at the saved track and seeks to the saved time
           await TrackPlayer.skip(index, savedPosMs / 1000);
           await TrackPlayer.setRepeatMode(mapRepeatMode(repeat));
-          // Restore paused — don't auto-play on app open
           setIsInitialized(true);
         } else {
           await fetchQueue();
@@ -617,11 +592,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  /**
-   * Seek to an absolute position.
-   * @param positionMs  Target position in milliseconds (consumer API).
-   *                    Converted to seconds before calling RNTP.
-   */
   const seekTo = useCallback(async (positionMs: number) => {
     await TrackPlayer.seekTo(positionMs / 1000);
   }, []);
@@ -673,13 +643,13 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     await TrackPlayer.play();
     setLiveState(State.Playing);
     TracksService.recordPlay(q[nextIndex].id);
-  }, []);
+    void ensureQueueHealth();
+  }, [ensureQueueHealth]);
 
   const playPrevious = useCallback(async () => {
     const q = queueRef.current;
     if (q.length === 0) return;
 
-    // If more than 3 seconds in, restart the current track
     if (position > 3) {
       await TrackPlayer.seekTo(0);
       return;
@@ -695,52 +665,58 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     TracksService.recordPlay(q[prevIndex].id);
   }, [position]);
 
-  const playTrack = useCallback(async (track: Track) => {
-    try {
-      const localUri = await OfflineService.resolvePlayableUri(track.id);
-      let canReach = true;
-      if (!localUri) {
-        try {
-          canReach = await canReachBackend(track.id);
-        } catch {
-          canReach = false;
+  // ── playTrack ─────────────────────────────────────────────────────────────
+
+  const playTrack = useCallback(
+    async (track: Track) => {
+      try {
+        const localUri = await OfflineService.resolvePlayableUri(track.id);
+        let canReach = true;
+        if (!localUri) {
+          try {
+            canReach = await canReachBackend(track.id);
+          } catch {
+            canReach = false;
+          }
         }
-      }
-      const offlineNoLocal = !localUri && !canReach;
-      if (offlineNoLocal) {
-        setPlaybackError("network");
+        if (!localUri && !canReach) {
+          setPlaybackError("network");
+          return;
+        }
+      } catch (error) {
+        console.error("[PlayerContext] Error checking offline state:", error);
+        setPlaybackError("load_failed");
         return;
       }
-    } catch (error) {
-      console.error("[PlayerContext] Error checking offline state:", error);
-      setPlaybackError("load_failed");
-      return;
-    }
 
-    let q = queueRef.current;
-    let idx = q.findIndex((t) => t.id === track.id);
+      let q = queueRef.current;
+      let idx = q.findIndex((t) => t.id === track.id);
 
-    // If the track is not in the queue yet (e.g. freshly requested from Search),
-    // append it so tapping can play immediately.
-    if (idx === -1) {
-      const nextQueue = [...q, track];
-      idx = nextQueue.length - 1;
-      queueRef.current = nextQueue;
-      setQueue(nextQueue);
-      await TrackPlayer.add(await toRNTPTrack(track));
-      q = nextQueue;
-    }
+      if (idx === -1) {
+        // Track not in queue — append it and ensure the queue gets filled around it
+        const nextQueue = [...q, track];
+        idx = nextQueue.length - 1;
+        queueRef.current = nextQueue;
+        setQueue(nextQueue);
+        await TrackPlayer.add(await toRNTPTrack(track));
+        q = nextQueue;
+      }
 
-    currentIndexRef.current = idx;
-    setCurrentTrack(q[idx]);
+      currentIndexRef.current = idx;
+      setCurrentTrack(q[idx]);
 
-    await TrackPlayer.skip(idx);
-    await TrackPlayer.play();
-    setLiveState(State.Playing);
-    TracksService.recordPlay(track.id);
-  }, []);
+      await TrackPlayer.skip(idx);
+      await TrackPlayer.play();
+      setLiveState(State.Playing);
+      TracksService.recordPlay(track.id);
 
-  // ── Shuffle / Repeat ─────────────────────────────────────────────────────
+      // Always check queue health after playing a track from search
+      void ensureQueueHealth();
+    },
+    [ensureQueueHealth],
+  );
+
+  // ── Shuffle / Repeat ──────────────────────────────────────────────────────
 
   const toggleShuffle = useCallback(() => {
     setIsShuffle((prev) => {
@@ -761,7 +737,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
   // ── Queue management ──────────────────────────────────────────────────────
 
-  /** Append a track to the end of the queue (no-op if already present). */
   const addToQueue = useCallback((track: Track) => {
     setQueue((prev) => {
       if (prev.find((t) => t.id === track.id)) return prev;
@@ -774,10 +749,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  /**
-   * Insert a track immediately after the currently playing one.
-   * If the track is already in the queue it is moved to that position.
-   */
   const addToQueueNext = useCallback((track: Track) => {
     setQueue((prev) => {
       const existingIdx = prev.findIndex((t) => t.id === track.id);
@@ -803,7 +774,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  /** Remove a track from the queue by its ID. */
   const removeFromQueue = useCallback((trackId: string) => {
     setQueue((prev) => {
       const idx = prev.findIndex((t) => t.id === trackId);
@@ -820,10 +790,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  /**
-   * Reorder the queue by moving a track from one index to another.
-   * currentIndexRef is updated so the playing track stays active.
-   */
   const reorderQueue = useCallback((fromIndex: number, toIndex: number) => {
     setQueue((prev) => {
       const next = [...prev];
@@ -840,29 +806,51 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  /**
-   * Jump to a specific upcoming track, discarding everything before it.
-   * Equivalent to "Play from here" in the queue sheet.
-   */
-  const skipToTrack = useCallback((trackId: string) => {
-    const q = queueRef.current;
-    const idx = q.findIndex((t) => t.id === trackId);
-    if (idx === -1 || idx === currentIndexRef.current) return;
+  // ── loadAndPlay: replace queue and start playing from a given index ─────────
 
-    const newQueue = q.slice(idx);
-    currentIndexRef.current = 0;
-    queueRef.current = newQueue;
-    setQueue(newQueue);
-    setCurrentTrack(newQueue[0]);
+  const loadAndPlay = useCallback(
+    async (tracks: Track[], startIndex: number) => {
+      if (tracks.length === 0) return;
+      const safeIndex = Math.max(0, Math.min(startIndex, tracks.length - 1));
 
-    Promise.all(newQueue.map(toRNTPTrack)).then((rntpQueue) =>
-      TrackPlayer.setQueue(rntpQueue).then(async () => {
-        await TrackPlayer.play();
-        setLiveState(State.Playing);
-        TracksService.recordPlay(newQueue[0].id);
-      }),
-    );
-  }, []);
+      queueRef.current = tracks;
+      setQueue(tracks);
+      currentIndexRef.current = safeIndex;
+      setCurrentTrack(tracks[safeIndex]);
+
+      await TrackPlayer.setQueue(await Promise.all(tracks.map(toRNTPTrack)));
+      await TrackPlayer.skip(safeIndex);
+      await TrackPlayer.play();
+      setLiveState(State.Playing);
+      TracksService.recordPlay(tracks[safeIndex].id);
+      void ensureQueueHealth();
+    },
+    [ensureQueueHealth],
+  );
+
+  const skipToTrack = useCallback(
+    (trackId: string) => {
+      const q = queueRef.current;
+      const idx = q.findIndex((t) => t.id === trackId);
+      if (idx === -1 || idx === currentIndexRef.current) return;
+
+      const newQueue = q.slice(idx);
+      currentIndexRef.current = 0;
+      queueRef.current = newQueue;
+      setQueue(newQueue);
+      setCurrentTrack(newQueue[0]);
+
+      Promise.all(newQueue.map(toRNTPTrack)).then((rntpQueue) =>
+        TrackPlayer.setQueue(rntpQueue).then(async () => {
+          await TrackPlayer.play();
+          setLiveState(State.Playing);
+          TracksService.recordPlay(newQueue[0].id);
+          void ensureQueueHealth();
+        }),
+      );
+    },
+    [ensureQueueHealth],
+  );
 
   // ── Like / Unlike ─────────────────────────────────────────────────────────
 
@@ -914,6 +902,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         removeFromQueue,
         reorderQueue,
         skipToTrack,
+        loadAndPlay,
       }}
     >
       {children}

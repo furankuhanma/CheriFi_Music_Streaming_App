@@ -81,14 +81,14 @@ export const AuthController = {
     }
   },
 
-  async me(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+async me(req: AuthenticatedRequest, res: Response, next: NextFunction) {
     try {
-      res.json({ success: true, data: req.user });
+      const user = await AuthService.getById(req.user!.userId);
+      res.json({ success: true, data: user });
     } catch (err) {
       next(err);
     }
   },
-
   // ── OAuth ───────────────────────────────────────────────────────────────────
   // The mobile app verifies the OAuth token with Google/Apple directly,
   // then sends us the verified user info. We trust it and issue our own tokens.

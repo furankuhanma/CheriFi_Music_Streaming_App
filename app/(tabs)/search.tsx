@@ -13,6 +13,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { usePlayer } from "../context/PlayerContext";
 import { TracksService, Track } from "../services/tracks.service";
 import {
@@ -25,6 +26,39 @@ import TrackActionsSheet from "../components/TrackActionsSheet";
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const DEBOUNCE_MS = 500;
+const HISTORY_KEY = "@cherifi:search_history";
+const MAX_HISTORY = 20;
+
+// ─── Search history helpers ───────────────────────────────────────────────────
+
+async function loadHistory(): Promise<string[]> {
+  try {
+    const raw = await AsyncStorage.getItem(HISTORY_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+async function saveHistory(history: string[]): Promise<void> {
+  try {
+    await AsyncStorage.setItem(HISTORY_KEY, JSON.stringify(history));
+  } catch {}
+}
+
+async function pushToHistory(query: string): Promise<string[]> {
+  const trimmed = query.trim();
+  if (!trimmed) return loadHistory();
+  const prev = await loadHistory();
+  // Deduplicate — remove existing entry if present, push to front
+  const deduped = [
+    trimmed,
+    ...prev.filter((h) => h.toLowerCase() !== trimmed.toLowerCase()),
+  ];
+  const next = deduped.slice(0, MAX_HISTORY);
+  await saveHistory(next);
+  return next;
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -35,7 +69,7 @@ function formatDuration(seconds: number): string {
   return `${m}:${s}`;
 }
 
-// ─── Request Button (for tracks not yet in DB) ────────────────────────────────
+// ─── Request Button ───────────────────────────────────────────────────────────
 
 function RequestButton({
   videoId,
@@ -111,8 +145,6 @@ function RequestButton({
         paddingVertical: 6,
         gap: 4,
       }}
-      accessibilityRole="button"
-      accessibilityLabel={`Request this track`}
     >
       <Ionicons name="cloud-download-outline" size={14} color="#1DB954" />
       <Text style={{ color: "#1DB954", fontSize: 12, fontWeight: "700" }}>
@@ -127,19 +159,16 @@ function RequestButton({
 function SearchResultRow({
   result,
   isActive,
-  likedIds,
   onPress,
   onLongPress,
   onTrackRequested,
 }: {
   result: YouTubeSearchResult;
   isActive: boolean;
-  likedIds: Set<string>;
   onPress: () => void;
   onLongPress: () => void;
   onTrackRequested: (videoId: string, track: Track) => void;
 }) {
-  // Tracks already in DB are pressable; YouTube-only ones show Request button
   const isInDb = result.inDatabase;
 
   return (
@@ -155,14 +184,7 @@ function SearchResultRow({
         paddingHorizontal: 4,
         opacity: isInDb ? 1 : 0.85,
       }}
-      accessibilityRole={isInDb ? "button" : "none"}
-      accessibilityLabel={
-        isInDb
-          ? `Play ${result.title} by ${result.channelTitle}`
-          : `Request ${result.title}`
-      }
     >
-      {/* Thumbnail */}
       {result.thumbnailUrl ? (
         <Image
           source={{ uri: result.thumbnailUrl }}
@@ -190,7 +212,6 @@ function SearchResultRow({
         </View>
       )}
 
-      {/* Title + artist */}
       <View style={{ flex: 1, marginRight: 8 }}>
         <Text
           style={{
@@ -224,7 +245,6 @@ function SearchResultRow({
         </View>
       </View>
 
-      {/* Right side — duration or playing indicator for DB tracks; Request button for YouTube-only */}
       <View style={{ alignItems: "flex-end" }}>
         {isInDb ? (
           <View style={{ alignItems: "center" }}>
@@ -248,6 +268,75 @@ function SearchResultRow({
         )}
       </View>
     </TouchableOpacity>
+  );
+}
+
+// ─── History List ─────────────────────────────────────────────────────────────
+
+function SearchHistory({
+  history,
+  onSelect,
+  onRemove,
+  onClearAll,
+}: {
+  history: string[];
+  onSelect: (query: string) => void;
+  onRemove: (query: string) => void;
+  onClearAll: () => void;
+}) {
+  if (history.length === 0) return null;
+
+  return (
+    <View style={{ paddingHorizontal: 16, paddingTop: 8 }}>
+      <View
+        style={{
+          flexDirection: "row",
+          alignItems: "center",
+          justifyContent: "space-between",
+          marginBottom: 12,
+        }}
+      >
+        <Text style={{ color: "white", fontSize: 16, fontWeight: "700" }}>
+          Recent searches
+        </Text>
+        <TouchableOpacity onPress={onClearAll}>
+          <Text style={{ color: "#1DB954", fontSize: 13, fontWeight: "600" }}>
+            Clear all
+          </Text>
+        </TouchableOpacity>
+      </View>
+      {history.map((item) => (
+        <View
+          key={item}
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            paddingVertical: 10,
+          }}
+        >
+          <TouchableOpacity
+            onPress={() => onSelect(item)}
+            style={{
+              flex: 1,
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 12,
+            }}
+          >
+            <Ionicons name="time-outline" size={18} color="#555" />
+            <Text
+              style={{ color: "#E5E5E5", fontSize: 14, flex: 1 }}
+              numberOfLines={1}
+            >
+              {item}
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => onRemove(item)} hitSlop={8}>
+            <Ionicons name="close" size={18} color="#555" />
+          </TouchableOpacity>
+        </View>
+      ))}
+    </View>
   );
 }
 
@@ -320,7 +409,7 @@ function EmptyState({ query }: { query: string }) {
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
 export default function SearchScreen() {
-  const { playTrack, currentTrack, addToQueue, addToQueueNext } = usePlayer();
+  const { loadAndPlay, currentTrack, addToQueue, addToQueueNext } = usePlayer();
 
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<YouTubeSearchResult[]>([]);
@@ -328,8 +417,10 @@ export default function SearchScreen() {
   const [error, setError] = useState<string | null>(null);
   const [hasSearched, setHasSearched] = useState(false);
 
-  // Like state — mirrors home.tsx pattern
   const [likedIds, setLikedIds] = useState<Set<string>>(new Set());
+
+  // Search history
+  const [history, setHistory] = useState<string[]>([]);
 
   // Action sheet
   const [selectedTrack, setSelectedTrack] = useState<Track | null>(null);
@@ -340,8 +431,14 @@ export default function SearchScreen() {
   const [playlistModalVisible, setPlaylistModalVisible] = useState(false);
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const inputRef = useRef<TextInput>(null);
 
-  // ── Search ─────────────────────────────────────────────────────────────────
+  // Load history on mount
+  useEffect(() => {
+    loadHistory().then(setHistory);
+  }, []);
+
+  // ── Search ──────────────────────────────────────────────────────────────────
 
   const performSearch = useCallback(async (q: string) => {
     const trimmed = q.trim();
@@ -359,7 +456,6 @@ export default function SearchScreen() {
     try {
       const data = await SearchService.searchYouTube(trimmed);
       setResults(data);
-      // Seed likedIds from DB tracks in results
       setLikedIds((prev) => {
         const next = new Set(prev);
         data.forEach((r: YouTubeSearchResult) => {
@@ -367,6 +463,9 @@ export default function SearchScreen() {
         });
         return next;
       });
+      // Save to history after successful search
+      const updated = await pushToHistory(trimmed);
+      setHistory(updated);
     } catch (err: any) {
       setError(err?.message ?? "Search failed. Please try again.");
       setResults([]);
@@ -375,7 +474,6 @@ export default function SearchScreen() {
     }
   }, []);
 
-  // Debounced input handler
   const handleQueryChange = useCallback(
     (text: string) => {
       setQuery(text);
@@ -395,7 +493,29 @@ export default function SearchScreen() {
     if (debounceRef.current) clearTimeout(debounceRef.current);
   }, []);
 
-  // ── When a YouTube-only track gets imported ────────────────────────────────
+  // ── History actions ─────────────────────────────────────────────────────────
+
+  const handleHistorySelect = useCallback(
+    (q: string) => {
+      setQuery(q);
+      performSearch(q);
+    },
+    [performSearch],
+  );
+
+  const handleHistoryRemove = useCallback(async (q: string) => {
+    const prev = await loadHistory();
+    const next = prev.filter((h) => h.toLowerCase() !== q.toLowerCase());
+    await saveHistory(next);
+    setHistory(next);
+  }, []);
+
+  const handleClearAll = useCallback(async () => {
+    await saveHistory([]);
+    setHistory([]);
+  }, []);
+
+  // ── Track requested (YouTube → DB) ─────────────────────────────────────────
 
   const handleTrackRequested = useCallback((videoId: string, track: Track) => {
     setResults((prev) =>
@@ -415,7 +535,7 @@ export default function SearchScreen() {
     );
   }, []);
 
-  // ── Like toggle (same pattern as home.tsx) ─────────────────────────────────
+  // ── Like toggle ─────────────────────────────────────────────────────────────
 
   const handleLikeToggle = useCallback(
     async (track: Track) => {
@@ -440,14 +560,51 @@ export default function SearchScreen() {
     [likedIds],
   );
 
-  // ── Long press (only for DB tracks) ───────────────────────────────────────
+  // ── Long press ──────────────────────────────────────────────────────────────
 
   const handleLongPress = useCallback((track: Track) => {
     setSelectedTrack(track);
     setSheetVisible(true);
   }, []);
 
-  // ── Render item ────────────────────────────────────────────────────────────
+  // ── Track press: build queue from DB then play ──────────────────────────────
+
+  const handleTrackPress = useCallback(
+    async (tappedTrack: Track) => {
+      try {
+        // Fetch a page of DB tracks to use as the queue
+        const res = await TracksService.getAll(1, 30);
+        const dbTracks = res.tracks;
+
+        // Find the tapped track in the DB results
+        const tappedIdx = dbTracks.findIndex((t) => t.id === tappedTrack.id);
+
+        let orderedTracks: Track[];
+        let startIndex: number;
+
+        if (tappedIdx !== -1) {
+          // Rotate the array so the tapped track is first, rest follow naturally
+          orderedTracks = [
+            ...dbTracks.slice(tappedIdx),
+            ...dbTracks.slice(0, tappedIdx),
+          ];
+          startIndex = 0;
+        } else {
+          // Track isn't in the current DB page (edge case) — put it first
+          orderedTracks = [tappedTrack, ...dbTracks];
+          startIndex = 0;
+        }
+
+        await loadAndPlay(orderedTracks, startIndex);
+      } catch {
+        // Fallback: just play the single track if DB fetch fails
+        await loadAndPlay([tappedTrack], 0);
+      }
+    },
+    [loadAndPlay],
+  );
+
+  // ── Render item ─────────────────────────────────────────────────────────────
 
   const renderItem = useCallback(
     ({ item }: { item: YouTubeSearchResult }) => {
@@ -456,14 +613,13 @@ export default function SearchScreen() {
         <SearchResultRow
           result={item}
           isActive={isActive}
-          likedIds={likedIds}
-          onPress={() => item.track && playTrack(item.track)}
+          onPress={() => item.track && handleTrackPress(item.track)}
           onLongPress={() => item.track && handleLongPress(item.track)}
           onTrackRequested={handleTrackRequested}
         />
       );
     },
-    [currentTrack, likedIds, playTrack, handleLongPress, handleTrackRequested],
+    [currentTrack, handleTrackPress, handleLongPress, handleTrackRequested],
   );
 
   const keyExtractor = useCallback(
@@ -471,11 +627,12 @@ export default function SearchScreen() {
     [],
   );
 
-  // ── Render ─────────────────────────────────────────────────────────────────
+  // ── Render ──────────────────────────────────────────────────────────────────
 
   const showIdle = !hasSearched && !isSearching;
   const showEmpty =
     hasSearched && !isSearching && results.length === 0 && !error;
+  const showHistory = showIdle && history.length > 0;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: "#121212" }}>
@@ -505,6 +662,7 @@ export default function SearchScreen() {
         >
           <Ionicons name="search" size={18} color="#666" />
           <TextInput
+            ref={inputRef}
             style={{
               flex: 1,
               marginLeft: 8,
@@ -583,7 +741,7 @@ export default function SearchScreen() {
         </View>
       )}
 
-      {/* Loading spinner */}
+      {/* Loading */}
       {isSearching && (
         <View
           style={{
@@ -629,8 +787,18 @@ export default function SearchScreen() {
         </View>
       )}
 
-      {/* Idle state */}
-      {showIdle && !isSearching && <IdleState />}
+      {/* Search history (shown when idle and history exists) */}
+      {!isSearching && showHistory && (
+        <SearchHistory
+          history={history}
+          onSelect={handleHistorySelect}
+          onRemove={handleHistoryRemove}
+          onClearAll={handleClearAll}
+        />
+      )}
+
+      {/* Idle state (no history) */}
+      {showIdle && !isSearching && !showHistory && <IdleState />}
 
       {/* Empty state */}
       {showEmpty && <EmptyState query={query} />}
@@ -641,10 +809,7 @@ export default function SearchScreen() {
           data={results}
           keyExtractor={keyExtractor}
           renderItem={renderItem}
-          contentContainerStyle={{
-            paddingHorizontal: 16,
-            paddingBottom: 120,
-          }}
+          contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 120 }}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
           ItemSeparatorComponent={() => (

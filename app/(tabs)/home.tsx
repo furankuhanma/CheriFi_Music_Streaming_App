@@ -1,23 +1,71 @@
 // CheriFi/app/(tabs)/home.tsx
-// Changes from original:
-//   1. Import AddToPlaylistModal
-//   2. Add playlistTrackId + playlistModalVisible state
-//   3. Replace Alert.alert("Add to Playlist") with modal open
-//   4. Add <AddToPlaylistModal> at the bottom of the return
 
 import { useEffect, useState, useCallback } from "react";
-import { ScrollView, Text, View, TouchableOpacity, Image } from "react-native";
+import {
+  ScrollView,
+  Text,
+  View,
+  TouchableOpacity,
+  Image,
+  Dimensions,
+} from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { usePlayer } from "../context/PlayerContext";
 import { RecommendationsService } from "../services/recommendations.service";
 import { TracksService, Track } from "../services/tracks.service";
-import AddToPlaylistModal from "../components/AddToPlaylistModal"; // ← NEW
+import { PlaylistsService, Playlist } from "../services/playlists.api";
+import PlaylistCover from "../components/PlaylistCover";
+import AddToPlaylistModal from "../components/AddToPlaylistModal";
 import TrackActionsSheet from "../components/TrackActionsSheet";
 
-const recentItems = ["Liked Songs", "Daily Mix 1", "Top Hits", "Chill Vibes"];
+const SCREEN_WIDTH = Dimensions.get("window").width;
+const CARD_WIDTH = 140;
 
-// ─── Skeleton row ─────────────────────────────────────────────────────────────
+// ─── Greeting ─────────────────────────────────────────────────────────────────
+
+function getGreeting(): string {
+  const hour = new Date().getHours();
+  if (hour < 12) return "Good morning 👋";
+  if (hour < 18) return "Good afternoon 👋";
+  return "Good evening 👋";
+}
+
+// ─── Skeleton: grid card ──────────────────────────────────────────────────────
+
+function SkeletonGridCard() {
+  return (
+    <View
+      className="bg-[#282828] rounded-md flex-row items-center overflow-hidden"
+      style={{ width: "48%", height: 56 }}
+    >
+      <View style={{ width: 56, height: 56, backgroundColor: "#1E1E1E" }} />
+      <View className="flex-1 mx-3 h-3 rounded bg-[#1E1E1E]" />
+    </View>
+  );
+}
+
+// ─── Skeleton: horizontal card ────────────────────────────────────────────────
+
+function SkeletonHCard() {
+  return (
+    <View style={{ width: CARD_WIDTH, marginRight: 12 }}>
+      <View
+        style={{
+          width: CARD_WIDTH,
+          height: CARD_WIDTH,
+          borderRadius: 8,
+          backgroundColor: "#282828",
+          marginBottom: 8,
+        }}
+      />
+      <View className="h-3 w-4/5 rounded bg-[#282828] mb-1.5" />
+      <View className="h-3 w-3/5 rounded bg-[#1E1E1E]" />
+    </View>
+  );
+}
+
+// ─── Skeleton: track row ──────────────────────────────────────────────────────
 
 function SkeletonRow() {
   return (
@@ -31,7 +79,131 @@ function SkeletonRow() {
   );
 }
 
-// ─── Track row ────────────────────────────────────────────────────────────────
+// ─── Horizontal track card ────────────────────────────────────────────────────
+
+function TrackCard({
+  track,
+  isActive,
+  onPress,
+  onLongPress,
+}: {
+  track: Track;
+  isActive: boolean;
+  onPress: () => void;
+  onLongPress: () => void;
+}) {
+  return (
+    <TouchableOpacity
+      onPress={onPress}
+      onLongPress={onLongPress}
+      delayLongPress={350}
+      style={{ width: CARD_WIDTH, marginRight: 12 }}
+      accessibilityRole="button"
+      accessibilityLabel={`Play ${track.title} by ${track.artist.name}`}
+    >
+      {track.coverUrl ? (
+        <Image
+          source={{ uri: track.coverUrl }}
+          style={{
+            width: CARD_WIDTH,
+            height: CARD_WIDTH,
+            borderRadius: 8,
+            backgroundColor: "#282828",
+            marginBottom: 8,
+          }}
+        />
+      ) : (
+        <View
+          style={{
+            width: CARD_WIDTH,
+            height: CARD_WIDTH,
+            borderRadius: 8,
+            backgroundColor: "#282828",
+            marginBottom: 8,
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <Ionicons name="musical-note" size={36} color="#555" />
+        </View>
+      )}
+
+      <Text
+        numberOfLines={1}
+        style={{
+          color: isActive ? "#1DB954" : "white",
+          fontSize: 13,
+          fontWeight: "600",
+          marginBottom: 2,
+        }}
+      >
+        {track.title}
+      </Text>
+      <Text numberOfLines={1} style={{ color: "#B3B3B3", fontSize: 11 }}>
+        {track.artist.name}
+      </Text>
+
+      {isActive && (
+        <View style={{ position: "absolute", top: 8, right: 8 }}>
+          <View
+            style={{
+              backgroundColor: "#1DB954",
+              borderRadius: 12,
+              padding: 4,
+            }}
+          >
+            <Ionicons name="musical-notes" size={12} color="white" />
+          </View>
+        </View>
+      )}
+    </TouchableOpacity>
+  );
+}
+
+// ─── Horizontal section ───────────────────────────────────────────────────────
+
+function HorizontalSection({
+  title,
+  tracks,
+  isLoading,
+  currentTrackId,
+  onTrackPress,
+  onTrackLongPress,
+}: {
+  title: string;
+  tracks: Track[];
+  isLoading: boolean;
+  currentTrackId: string | null;
+  onTrackPress: (track: Track) => void;
+  onTrackLongPress: (track: Track) => void;
+}) {
+  if (!isLoading && tracks.length === 0) return null;
+
+  return (
+    <View className="mb-8">
+      <Text className="text-white text-xl font-bold mb-4">{title}</Text>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={{ paddingRight: 16 }}
+      >
+        {isLoading
+          ? Array.from({ length: 4 }).map((_, i) => <SkeletonHCard key={i} />)
+          : tracks.map((track) => (
+              <TrackCard
+                key={track.id}
+                track={track}
+                isActive={track.id === currentTrackId}
+                onPress={() => onTrackPress(track)}
+                onLongPress={() => onTrackLongPress(track)}
+              />
+            ))}
+      </ScrollView>
+    </View>
+  );
+}
+
+// ─── Vertical track row ───────────────────────────────────────────────────────
 
 function TrackRow({
   track,
@@ -55,7 +227,6 @@ function TrackRow({
       className="flex-row items-center py-3 px-1"
       accessibilityRole="button"
       accessibilityLabel={`Play ${track.title} by ${track.artist.name}`}
-      accessibilityHint="Double tap to play. Hold for more options."
     >
       {track.coverUrl ? (
         <Image
@@ -96,9 +267,9 @@ function TrackRow({
   );
 }
 
-// ─── Section ──────────────────────────────────────────────────────────────────
+// ─── Vertical section ─────────────────────────────────────────────────────────
 
-function Section({
+function VerticalSection({
   title,
   tracks,
   isLoading,
@@ -173,6 +344,7 @@ export default function HomeScreen() {
     toggleLike,
   } = usePlayer();
 
+  // Vertical sections
   const [forYou, setForYou] = useState<Track[]>([]);
   const [popular, setPopular] = useState<Track[]>([]);
   const [forYouLoading, setForYouLoading] = useState(true);
@@ -180,16 +352,24 @@ export default function HomeScreen() {
   const [forYouError, setForYouError] = useState(false);
   const [popularError, setPopularError] = useState(false);
 
+  // Horizontal sections
+  const [liked, setLiked] = useState<Track[]>([]);
+  const [recentlyPlayed, setRecentlyPlayed] = useState<Track[]>([]);
+  const [likedLoading, setLikedLoading] = useState(true);
+  const [recentLoading, setRecentLoading] = useState(true);
+
+  // Playlist grid
+  const [playlists, setPlaylists] = useState<Playlist[]>([]);
+  const [playlistsLoading, setPlaylistsLoading] = useState(true);
+
+  // Action sheet / modal
   const [selectedTrack, setSelectedTrack] = useState<Track | null>(null);
   const [sheetVisible, setSheetVisible] = useState(false);
-
-  // ── NEW: playlist modal state ─────────────────────────────────────────────
   const [playlistTrackId, setPlaylistTrackId] = useState<string | null>(null);
   const [playlistModalVisible, setPlaylistModalVisible] = useState(false);
-
   const [likedIds, setLikedIds] = useState<Set<string>>(new Set());
 
-  // ── Data loading ────────────────────────────────────────────────────────────
+  // ── Loaders ─────────────────────────────────────────────────────────────────
 
   const loadForYou = async () => {
     setForYouLoading(true);
@@ -231,19 +411,56 @@ export default function HomeScreen() {
     }
   };
 
+  const loadLiked = async () => {
+    setLikedLoading(true);
+    try {
+      const tracks = await TracksService.getLiked(20);
+      setLiked(tracks);
+    } catch {
+      // silently fail — section just won't show
+    } finally {
+      setLikedLoading(false);
+    }
+  };
+
+  const loadRecentlyPlayed = async () => {
+    setRecentLoading(true);
+    try {
+      const tracks = await TracksService.getRecentlyPlayed(20);
+      setRecentlyPlayed(tracks);
+    } catch {
+      // silently fail
+    } finally {
+      setRecentLoading(false);
+    }
+  };
+
+  const loadPlaylists = async () => {
+    setPlaylistsLoading(true);
+    try {
+      const data = await PlaylistsService.getAll();
+      setPlaylists(data.slice(0, 4));
+    } catch {
+      // silently fail
+    } finally {
+      setPlaylistsLoading(false);
+    }
+  };
+
   useEffect(() => {
     loadForYou();
     loadPopular();
+    loadLiked();
+    loadRecentlyPlayed();
+    loadPlaylists();
   }, []);
 
-  // ── Long press handler ──────────────────────────────────────────────────────
+  // ── Handlers ─────────────────────────────────────────────────────────────────
 
   const handleLongPress = useCallback((track: Track) => {
     setSelectedTrack(track);
     setSheetVisible(true);
   }, []);
-
-  // ── Like toggle ─────────────────────────────────────────────────────────────
 
   const handleLikeToggle = useCallback(
     async (track: Track) => {
@@ -270,34 +487,63 @@ export default function HomeScreen() {
     [likedIds],
   );
 
-  // ── Render ──────────────────────────────────────────────────────────────────
+  // ── Render ───────────────────────────────────────────────────────────────────
 
   return (
     <SafeAreaView className="flex-1 bg-[#121212]">
       <ScrollView className="px-4 pt-6" showsVerticalScrollIndicator={false}>
+        {/* Greeting */}
         <Text className="text-white text-2xl font-bold mb-6">
-          Good evening 👋
+          {getGreeting()}
         </Text>
 
-        <View className="flex-row flex-wrap gap-2 mb-8">
-          {recentItems.map((item) => (
-            <View
-              key={item}
-              className="bg-[#282828] rounded-md flex-row items-center overflow-hidden"
-              style={{ width: "48%", height: 56 }}
-            >
-              <View className="w-14 h-14 bg-[#1DB954]" />
-              <Text
-                className="text-white font-semibold text-sm ml-3 flex-1"
-                numberOfLines={1}
-              >
-                {item}
-              </Text>
-            </View>
-          ))}
-        </View>
+        {/* ── Playlist quick-access grid ── */}
+        {(playlistsLoading || playlists.length > 0) && (
+          <View className="flex-row flex-wrap gap-2 mb-8">
+            {playlistsLoading
+              ? Array.from({ length: 4 }).map((_, i) => (
+                  <SkeletonGridCard key={i} />
+                ))
+              : playlists.map((playlist) => (
+                  <TouchableOpacity
+                    key={playlist.id}
+                    className="bg-[#282828] rounded-md flex-row items-center overflow-hidden"
+                    style={{ width: "48%", height: 56 }}
+                  >
+                    <PlaylistCover playlist={playlist} size={56} rounded={0} />
+                    <Text
+                      className="text-white font-semibold text-sm ml-3 flex-1"
+                      numberOfLines={1}
+                    >
+                      {playlist.title}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+          </View>
+        )}
 
-        <Section
+        {/* ── Recently Liked — horizontal swipeable cards ── */}
+        <HorizontalSection
+          title="Recently Liked"
+          tracks={liked}
+          isLoading={likedLoading}
+          currentTrackId={currentTrack?.id ?? null}
+          onTrackPress={playTrack}
+          onTrackLongPress={handleLongPress}
+        />
+
+        {/* ── Jump Back In — horizontal swipeable cards ── */}
+        <HorizontalSection
+          title="Jump Back In"
+          tracks={recentlyPlayed}
+          isLoading={recentLoading}
+          currentTrackId={currentTrack?.id ?? null}
+          onTrackPress={playTrack}
+          onTrackLongPress={handleLongPress}
+        />
+
+        {/* ── For You — vertical track list ── */}
+        <VerticalSection
           title="For You"
           tracks={forYou}
           isLoading={forYouLoading}
@@ -308,7 +554,8 @@ export default function HomeScreen() {
           onTrackLongPress={handleLongPress}
         />
 
-        <Section
+        {/* ── Popular — vertical track list ── */}
+        <VerticalSection
           title="Popular"
           tracks={popular}
           isLoading={popularLoading}
@@ -337,7 +584,7 @@ export default function HomeScreen() {
         }}
       />
 
-      {/* Add to playlist modal — NEW */}
+      {/* Add to playlist modal */}
       <AddToPlaylistModal
         trackId={playlistTrackId}
         visible={playlistModalVisible}

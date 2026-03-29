@@ -9,7 +9,7 @@ import { JwtPayload } from "../../types";
 
 function generateAccessToken(payload: JwtPayload): string {
   return jwt.sign(payload, process.env.JWT_ACCESS_SECRET!, {
-    expiresIn: process.env.JWT_ACCESS_EXPIRES_IN ?? "15m",
+    expiresIn: process.env.JWT_ACCESS_EXPIRES_IN ?? "7d",
   } as jwt.SignOptions);
 }
 
@@ -17,12 +17,14 @@ function generateRefreshToken(): string {
   return uuidv4() + uuidv4(); // 72-char opaque token
 }
 
+
+
 async function saveRefreshToken(
   userId: string,
   token: string,
 ): Promise<void> {
   const expiresAt = new Date();
-  expiresAt.setDate(expiresAt.getDate() + 7); // 7 days
+  expiresAt.setDate(expiresAt.getDate() + 30); // 30 days
 
   await prisma.refreshToken.create({
     data: { token, userId, expiresAt },
@@ -116,6 +118,20 @@ export const AuthService = {
     await prisma.refreshToken
       .delete({ where: { token } })
       .catch(() => null); // ignore if already deleted
+  },
+  async getById(userId: string) {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        email: true,
+        username: true,
+        displayName: true,
+        avatarUrl: true,
+      },
+    });
+    if (!user) throw createError("User not found", 404);
+    return user;
   },
 
   // ── OAuth ───────────────────────────────────────────────────────────────────
