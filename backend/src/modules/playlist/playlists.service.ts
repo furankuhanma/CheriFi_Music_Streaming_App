@@ -119,4 +119,129 @@ export const PlaylistsService = {
     await prisma.playlist.delete({ where: { id: playlistId } });
     return true;
   },
+
+  async getQuickAccessPlaylists(userId: string, limit = 4) {
+    const userPlaylists = await prisma.playlist.findMany({
+      where: { userId },
+      orderBy: { createdAt: "desc" },
+      select: {
+        id: true,
+        title: true,
+        coverUrl: true,
+        isPublic: true,
+        userId: true,
+        tracks: {
+          take: 4,
+          select: {
+            track: { select: { coverUrl: true } },
+          },
+        },
+        _count: { select: { tracks: true } },
+      },
+    });
+
+    // If user has enough playlists, just return those
+    if (userPlaylists.length >= limit) {
+      return userPlaylists.slice(0, limit).map((p) => ({
+        id: p.id,
+        title: p.title,
+        coverUrl: p.coverUrl,
+        isPublic: p.isPublic,
+        owner: { id: userId, username: "You" },
+        trackCount: p._count.tracks,
+        tracks: p.tracks.map((pt) => ({
+          playlistId: p.id,
+          trackId: "",
+          position: 0,
+          addedAt: new Date().toISOString(),
+          track: {
+            id: "",
+            title: "",
+            duration: 0,
+            audioUrl: "",
+            coverUrl: pt.track.coverUrl,
+            artist: { id: "", name: "" },
+            album: null,
+          },
+        })),
+      }));
+    }
+
+    // Otherwise, mix in random public playlists from other users
+    const neededCount = limit - userPlaylists.length;
+    const publicPlaylists = await prisma.playlist.findMany({
+      where: {
+        isPublic: true,
+        userId: { not: userId },
+      },
+      take: neededCount,
+      orderBy: { createdAt: "desc" },
+      select: {
+        id: true,
+        title: true,
+        coverUrl: true,
+        isPublic: true,
+        userId: true,
+        user: { select: { id: true, username: true } },
+        tracks: {
+          take: 4,
+          select: {
+            track: { select: { coverUrl: true } },
+          },
+        },
+        _count: { select: { tracks: true } },
+      },
+    });
+
+    const combined = [
+      ...userPlaylists.map((p) => ({
+        id: p.id,
+        title: p.title,
+        coverUrl: p.coverUrl,
+        isPublic: p.isPublic,
+        owner: { id: userId, username: "You" },
+        trackCount: p._count.tracks,
+        tracks: p.tracks.map((pt) => ({
+          playlistId: p.id,
+          trackId: "",
+          position: 0,
+          addedAt: new Date().toISOString(),
+          track: {
+            id: "",
+            title: "",
+            duration: 0,
+            audioUrl: "",
+            coverUrl: pt.track.coverUrl,
+            artist: { id: "", name: "" },
+            album: null,
+          },
+        })),
+      })),
+      ...publicPlaylists.map((p) => ({
+        id: p.id,
+        title: p.title,
+        coverUrl: p.coverUrl,
+        isPublic: p.isPublic,
+        owner: { id: p.user.id, username: p.user.username },
+        trackCount: p._count.tracks,
+        tracks: p.tracks.map((pt) => ({
+          playlistId: p.id,
+          trackId: "",
+          position: 0,
+          addedAt: new Date().toISOString(),
+          track: {
+            id: "",
+            title: "",
+            duration: 0,
+            audioUrl: "",
+            coverUrl: pt.track.coverUrl,
+            artist: { id: "", name: "" },
+            album: null,
+          },
+        })),
+      })),
+    ];
+
+    return combined;
+  },
 };

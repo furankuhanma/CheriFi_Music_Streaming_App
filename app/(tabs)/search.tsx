@@ -6,6 +6,7 @@ import {
   Alert,
   FlatList,
   Image,
+  ScrollView,
   Text,
   TextInput,
   TouchableOpacity,
@@ -14,11 +15,13 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { useRouter } from "expo-router";
 import { usePlayer } from "../context/PlayerContext";
 import { TracksService, Track } from "../services/tracks.service";
 import {
   SearchService,
   YouTubeSearchResult,
+  ArtistResult,
 } from "@/app/services/search.service";
 import AddToPlaylistModal from "../components/AddToPlaylistModal";
 import TrackActionsSheet from "../components/TrackActionsSheet";
@@ -28,6 +31,7 @@ import TrackActionsSheet from "../components/TrackActionsSheet";
 const DEBOUNCE_MS = 500;
 const HISTORY_KEY = "@cherifi:search_history";
 const MAX_HISTORY = 20;
+const ARTIST_CARD_SIZE = 80;
 
 // ─── Search history helpers ───────────────────────────────────────────────────
 
@@ -50,7 +54,6 @@ async function pushToHistory(query: string): Promise<string[]> {
   const trimmed = query.trim();
   if (!trimmed) return loadHistory();
   const prev = await loadHistory();
-  // Deduplicate — remove existing entry if present, push to front
   const deduped = [
     trimmed,
     ...prev.filter((h) => h.toLowerCase() !== trimmed.toLowerCase()),
@@ -67,6 +70,114 @@ function formatDuration(seconds: number): string {
   const m = Math.floor(seconds / 60);
   const s = String(seconds % 60).padStart(2, "0");
   return `${m}:${s}`;
+}
+
+// ─── Artist Card (circular, like home page) ───────────────────────────────────
+
+function ArtistCard({
+  artist,
+  onPress,
+}: {
+  artist: ArtistResult;
+  onPress: () => void;
+}) {
+  return (
+    <TouchableOpacity
+      onPress={onPress}
+      activeOpacity={0.8}
+      style={{ alignItems: "center", marginRight: 16, width: ARTIST_CARD_SIZE }}
+    >
+      {artist.imageUrl ? (
+        <Image
+          source={{ uri: artist.imageUrl }}
+          style={{
+            width: ARTIST_CARD_SIZE,
+            height: ARTIST_CARD_SIZE,
+            borderRadius: ARTIST_CARD_SIZE / 2,
+            backgroundColor: "#282828",
+            marginBottom: 8,
+          }}
+        />
+      ) : (
+        <View
+          style={{
+            width: ARTIST_CARD_SIZE,
+            height: ARTIST_CARD_SIZE,
+            borderRadius: ARTIST_CARD_SIZE / 2,
+            backgroundColor: "#282828",
+            marginBottom: 8,
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <Ionicons name="person" size={32} color="#555" />
+        </View>
+      )}
+      <Text
+        numberOfLines={1}
+        style={{
+          color: "white",
+          fontSize: 12,
+          fontWeight: "600",
+          textAlign: "center",
+        }}
+      >
+        {artist.name}
+      </Text>
+      <Text
+        numberOfLines={1}
+        style={{
+          color: "#555",
+          fontSize: 10,
+          marginTop: 2,
+          textAlign: "center",
+        }}
+      >
+        {artist.trackCount} {artist.trackCount === 1 ? "song" : "songs"}
+      </Text>
+    </TouchableOpacity>
+  );
+}
+
+// ─── Artist Results Section ───────────────────────────────────────────────────
+
+function ArtistSection({
+  artists,
+  onPress,
+}: {
+  artists: ArtistResult[];
+  onPress: (artist: ArtistResult) => void;
+}) {
+  if (artists.length === 0) return null;
+
+  return (
+    <View style={{ marginBottom: 16 }}>
+      <Text
+        style={{
+          color: "white",
+          fontSize: 16,
+          fontWeight: "700",
+          paddingHorizontal: 16,
+          marginBottom: 12,
+        }}
+      >
+        Artists
+      </Text>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={{ paddingHorizontal: 16 }}
+      >
+        {artists.map((artist) => (
+          <ArtistCard
+            key={artist.id}
+            artist={artist}
+            onPress={() => onPress(artist)}
+          />
+        ))}
+      </ScrollView>
+    </View>
+  );
 }
 
 // ─── Request Button ───────────────────────────────────────────────────────────
@@ -170,6 +281,7 @@ function SearchResultRow({
   onTrackRequested: (videoId: string, track: Track) => void;
 }) {
   const isInDb = result.inDatabase;
+  const artistName = isInDb ? result.track?.artist.name : result.channelTitle;
 
   return (
     <TouchableOpacity
@@ -240,7 +352,7 @@ function SearchResultRow({
             </View>
           )}
           <Text style={{ color: "#B3B3B3", fontSize: 12 }} numberOfLines={1}>
-            {result.channelTitle}
+            {artistName}
           </Text>
         </View>
       </View>
@@ -409,9 +521,11 @@ function EmptyState({ query }: { query: string }) {
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
 export default function SearchScreen() {
+  const router = useRouter();
   const { loadAndPlay, currentTrack, addToQueue, addToQueueNext } = usePlayer();
 
   const [query, setQuery] = useState("");
+  const [artists, setArtists] = useState<ArtistResult[]>([]);
   const [results, setResults] = useState<YouTubeSearchResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -419,21 +533,17 @@ export default function SearchScreen() {
 
   const [likedIds, setLikedIds] = useState<Set<string>>(new Set());
 
-  // Search history
   const [history, setHistory] = useState<string[]>([]);
 
-  // Action sheet
   const [selectedTrack, setSelectedTrack] = useState<Track | null>(null);
   const [sheetVisible, setSheetVisible] = useState(false);
 
-  // Add-to-playlist modal
   const [playlistTrackId, setPlaylistTrackId] = useState<string | null>(null);
   const [playlistModalVisible, setPlaylistModalVisible] = useState(false);
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inputRef = useRef<TextInput>(null);
 
-  // Load history on mount
   useEffect(() => {
     loadHistory().then(setHistory);
   }, []);
@@ -444,6 +554,7 @@ export default function SearchScreen() {
     const trimmed = q.trim();
     if (!trimmed) {
       setResults([]);
+      setArtists([]);
       setHasSearched(false);
       setError(null);
       return;
@@ -455,20 +566,21 @@ export default function SearchScreen() {
 
     try {
       const data = await SearchService.searchYouTube(trimmed);
-      setResults(data);
+      setArtists(data.artists);
+      setResults(data.results);
       setLikedIds((prev) => {
         const next = new Set(prev);
-        data.forEach((r: YouTubeSearchResult) => {
+        data.results.forEach((r: YouTubeSearchResult) => {
           if (r.track?.isLiked) next.add(r.track.id);
         });
         return next;
       });
-      // Save to history after successful search
       const updated = await pushToHistory(trimmed);
       setHistory(updated);
     } catch (err: any) {
       setError(err?.message ?? "Search failed. Please try again.");
       setResults([]);
+      setArtists([]);
     } finally {
       setIsSearching(false);
     }
@@ -488,6 +600,7 @@ export default function SearchScreen() {
   const handleClear = useCallback(() => {
     setQuery("");
     setResults([]);
+    setArtists([]);
     setHasSearched(false);
     setError(null);
     if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -514,6 +627,23 @@ export default function SearchScreen() {
     await saveHistory([]);
     setHistory([]);
   }, []);
+
+  // ── Artist press → collection screen ───────────────────────────────────────
+
+  const handleArtistPress = useCallback(
+    (artist: ArtistResult) => {
+      router.push({
+        pathname: "/collection",
+        params: {
+          type: "artist",
+          id: artist.id,
+          title: artist.name,
+          coverUrl: artist.imageUrl ?? "",
+        },
+      });
+    },
+    [router],
+  );
 
   // ── Track requested (YouTube → DB) ─────────────────────────────────────────
 
@@ -567,37 +697,31 @@ export default function SearchScreen() {
     setSheetVisible(true);
   }, []);
 
-  // ── Track press: build queue from DB then play ──────────────────────────────
+  // ── Track press ─────────────────────────────────────────────────────────────
 
   const handleTrackPress = useCallback(
     async (tappedTrack: Track) => {
       try {
-        // Fetch a page of DB tracks to use as the queue
         const res = await TracksService.getAll(1, 30);
         const dbTracks = res.tracks;
-
-        // Find the tapped track in the DB results
         const tappedIdx = dbTracks.findIndex((t) => t.id === tappedTrack.id);
 
         let orderedTracks: Track[];
         let startIndex: number;
 
         if (tappedIdx !== -1) {
-          // Rotate the array so the tapped track is first, rest follow naturally
           orderedTracks = [
             ...dbTracks.slice(tappedIdx),
             ...dbTracks.slice(0, tappedIdx),
           ];
           startIndex = 0;
         } else {
-          // Track isn't in the current DB page (edge case) — put it first
           orderedTracks = [tappedTrack, ...dbTracks];
           startIndex = 0;
         }
 
         await loadAndPlay(orderedTracks, startIndex);
       } catch {
-        // Fallback: just play the single track if DB fetch fails
         await loadAndPlay([tappedTrack], 0);
       }
     },
@@ -631,7 +755,11 @@ export default function SearchScreen() {
 
   const showIdle = !hasSearched && !isSearching;
   const showEmpty =
-    hasSearched && !isSearching && results.length === 0 && !error;
+    hasSearched &&
+    !isSearching &&
+    results.length === 0 &&
+    artists.length === 0 &&
+    !error;
   const showHistory = showIdle && history.length > 0;
 
   return (
@@ -787,7 +915,7 @@ export default function SearchScreen() {
         </View>
       )}
 
-      {/* Search history (shown when idle and history exists) */}
+      {/* Search history */}
       {!isSearching && showHistory && (
         <SearchHistory
           history={history}
@@ -797,24 +925,31 @@ export default function SearchScreen() {
         />
       )}
 
-      {/* Idle state (no history) */}
+      {/* Idle state */}
       {showIdle && !isSearching && !showHistory && <IdleState />}
 
       {/* Empty state */}
       {showEmpty && <EmptyState query={query} />}
 
-      {/* Results list */}
-      {!isSearching && results.length > 0 && (
+      {/* Results: artists + tracks */}
+      {!isSearching && (artists.length > 0 || results.length > 0) && (
         <FlatList
           data={results}
           keyExtractor={keyExtractor}
           renderItem={renderItem}
+          ListHeaderComponent={
+            <ArtistSection artists={artists} onPress={handleArtistPress} />
+          }
           contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 120 }}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
           ItemSeparatorComponent={() => (
             <View
-              style={{ height: 1, backgroundColor: "#1E1E1E", marginLeft: 64 }}
+              style={{
+                height: 1,
+                backgroundColor: "#1E1E1E",
+                marginLeft: 64,
+              }}
             />
           )}
         />

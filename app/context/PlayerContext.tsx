@@ -259,6 +259,9 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isSetupDoneRef = useRef(false);
   const isRefillInProgressRef = useRef(false);
+  // When true, the queue was loaded from a specific collection (album/artist/playlist)
+  // and ensureQueueHealth must NOT append random tracks to it.
+  const isCollectionQueueRef = useRef(false);
 
   // Mirrors the latest RNTP position (seconds) without causing re-renders.
   // Used by the persist effect so playbackPosition is NOT a dependency there,
@@ -385,6 +388,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   // ── Queue health: auto-refill when running low ────────────────────────────
   const ensureQueueHealth = useCallback(async () => {
     if (isRefillInProgressRef.current) return;
+    // Never refill a collection queue — it must stay exactly as loaded
+    if (isCollectionQueueRef.current) return;
 
     const q = queueRef.current;
     const remaining = q.length - 1 - currentIndexRef.current;
@@ -457,6 +462,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const fetchQueue = useCallback(async () => {
     try {
       setPlaybackError(null);
+      // Leaving recommendation mode — clear the collection lock
+      isCollectionQueueRef.current = false;
       const tracks = await RecommendationsService.smart(20);
 
       if (tracks.length === 0) {
@@ -677,6 +684,9 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
   const playTrack = useCallback(
     async (track: Track) => {
+      // Tapping a track from home/library exits collection mode
+      isCollectionQueueRef.current = false;
+
       try {
         const localUri = await OfflineService.resolvePlayableUri(track.id);
         let canReach = true;
@@ -812,12 +822,17 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  // ── loadAndPlay: replace queue and start playing from a given index ────────
+  // ── loadAndPlay: replace queue with a collection and start playing ─────────
+  // Sets isCollectionQueueRef = true so ensureQueueHealth never appends
+  // random tracks to an album / artist / playlist queue.
 
   const loadAndPlay = useCallback(
     async (tracks: Track[], startIndex: number) => {
       if (tracks.length === 0) return;
       const safeIndex = Math.max(0, Math.min(startIndex, tracks.length - 1));
+
+      // Lock the queue — no auto-refill while playing a collection
+      isCollectionQueueRef.current = true;
 
       queueRef.current = tracks;
       setQueue(tracks);
@@ -829,9 +844,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       await TrackPlayer.play();
       setLiveState(State.Playing);
       TracksService.recordPlay(tracks[safeIndex].id);
-      void ensureQueueHealth();
     },
-    [ensureQueueHealth],
+    [],
   );
 
   const skipToTrack = useCallback(

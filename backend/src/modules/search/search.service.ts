@@ -44,6 +44,10 @@ type YouTubeSearchItem = {
   channelTitle: string;
   thumbnailUrl: string | null;
   duration: number;
+  genre?: string | null;
+  description?: string;
+  publishedAt?: string;
+  viewCount?: number;
 };
 
 export type YouTubeResult = {
@@ -54,6 +58,20 @@ export type YouTubeResult = {
   duration: number;
   inDatabase: boolean;
   track: TrackDto | null;
+};
+
+// ─── NEW: Artist result type ──────────────────────────────────────────────────
+
+export type ArtistResult = {
+  id: string;
+  name: string;
+  imageUrl: string | null;
+  trackCount: number;
+};
+
+export type SearchResult = {
+  artists: ArtistResult[];
+  results: YouTubeResult[];
 };
 
 function parseIsoDuration(iso: string): number {
@@ -93,6 +111,8 @@ async function searchYouTube(query: string, maxResults = 10): Promise<YouTubeSea
       snippet?: {
         title?: string;
         channelTitle?: string;
+        description?: string;
+        tags?: string[];
         thumbnails?: {
           default?: { url?: string };
           medium?: { url?: string };
@@ -108,12 +128,18 @@ async function searchYouTube(query: string, maxResults = 10): Promise<YouTubeSea
       if (!videoId) return null;
 
       const thumbs = item.snippet?.thumbnails;
+      const description = item.snippet?.description ?? "";
+      const tags = item.snippet?.tags ?? [];
+      const genre = extractGenre(tags, description);
+
       return {
         videoId,
         title: item.snippet?.title ?? "Unknown title",
         channelTitle: item.snippet?.channelTitle ?? "Unknown artist",
         thumbnailUrl:
           thumbs?.high?.url ?? thumbs?.medium?.url ?? thumbs?.default?.url ?? null,
+        genre,
+        description,
       };
     })
     .filter((item): item is NonNullable<typeof item> => item !== null);
@@ -143,7 +169,7 @@ async function searchYouTube(query: string, maxResults = 10): Promise<YouTubeSea
   return basicItems.map((item) => ({
     ...item,
     duration: durationById.get(item.videoId) ?? 0,
-  }));
+  })) as YouTubeSearchItem[];
 }
 
 async function fetchSingleVideo(videoId: string): Promise<YouTubeSearchItem | null> {
@@ -152,7 +178,7 @@ async function fetchSingleVideo(videoId: string): Promise<YouTubeSearchItem | nu
   const params = new URLSearchParams({
     key: apiKey,
     id: videoId,
-    part: "snippet,contentDetails",
+    part: "snippet,contentDetails,statistics,topicDetails",
   });
 
   const res = await fetch(`${YT_VIDEOS_URL}?${params}`);
@@ -164,6 +190,9 @@ async function fetchSingleVideo(videoId: string): Promise<YouTubeSearchItem | nu
       snippet?: {
         title?: string;
         channelTitle?: string;
+        description?: string;
+        publishedAt?: string;
+        tags?: string[];
         thumbnails?: {
           default?: { url?: string };
           medium?: { url?: string };
@@ -172,6 +201,8 @@ async function fetchSingleVideo(videoId: string): Promise<YouTubeSearchItem | nu
         };
       };
       contentDetails?: { duration?: string };
+      statistics?: { viewCount?: string };
+      topicDetails?: { topicCategories?: string[] };
     }>;
   };
 
@@ -179,6 +210,14 @@ async function fetchSingleVideo(videoId: string): Promise<YouTubeSearchItem | nu
   if (!item?.id) return null;
 
   const thumbs = item.snippet?.thumbnails;
+  const description = item.snippet?.description ?? "";
+  const tags = item.snippet?.tags ?? [];
+
+  const genre = extractGenre(tags, description);
+  const viewCount = item.statistics?.viewCount
+    ? parseInt(item.statistics.viewCount, 10)
+    : undefined;
+
   return {
     videoId: item.id,
     title: item.snippet?.title ?? "Unknown title",
@@ -190,36 +229,64 @@ async function fetchSingleVideo(videoId: string): Promise<YouTubeSearchItem | nu
       thumbs?.default?.url ??
       null,
     duration: parseIsoDuration(item.contentDetails?.duration ?? ""),
+    genre,
+    description,
+    publishedAt: item.snippet?.publishedAt,
+    viewCount,
   };
 }
 
-async function downloadToMusicDir(videoId: string, musicDir: string): Promise<void> {
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const ytdlModule = require("youtube-dl-exec");
-  const ytdl = (ytdlModule.default ?? ytdlModule) as (
-    url: string,
-    options: Record<string, unknown>,
-  ) => Promise<unknown>;
+function extractGenre(tags: string[], description: string): string | null {
+  const genreKeywords = [
+    "pop", "rock", "hiphop", "hip-hop", "rap", "jazz", "blues", "classical",
+    "electronic", "edm", "dance", "indie", "folk", "country", "reggae",
+    "latin", "metal", "rnb", "r&b", "soul", "funk", "punk", "alternative",
+    "ambient", "techno", "house", "dubstep", "trap", "gsap", "afrobeat",
+    "k-pop", "anime", "soundtrack", "gaming",
+  ];
 
-  fs.mkdirSync(musicDir, { recursive: true });
+  const text = `${tags.join(" ")} ${description}`.toLowerCase();
+  const found = genreKeywords.find((genre) => text.includes(genre));
 
-  await ytdl(`https://www.youtube.com/watch?v=${videoId}`, {
-    extractAudio: true,
-    audioFormat: "mp3",
-    audioQuality: 0,
-    output: path.join(musicDir, `${videoId}.%(ext)s`),
-    noPlaylist: true,
-    writeInfoJson: true,
-    quiet: true,
+  return found ? found.charAt(0).toUpperCase() + found.slice(1) : null;
+}
+
+// ─── NEW: Search artists in DB ────────────────────────────────────────────────
+
+async function searchArtists(query: string): Promise<ArtistResult[]> {
+  const artists = await prisma.artist.findMany({
+    where: {
+      name: { contains: query, mode: "insensitive" },
+    },
+    select: {
+      id: true,
+      name: true,
+      imageUrl: true,
+      _count: { select: { tracks: true } },
+    },
+    orderBy: { tracks: { _count: "desc" } },
+    take: 5,
   });
+
+  return artists.map((a) => ({
+    id: a.id,
+    name: a.name,
+    imageUrl: a.imageUrl,
+    trackCount: a._count.tracks,
+  }));
 }
 
 // ─── Search service ───────────────────────────────────────────────────────────
 
 export const SearchService = {
-  async search(query: string, userId?: string): Promise<YouTubeResult[]> {
-    const youtubeItems = await searchYouTube(query, 10);
-    if (youtubeItems.length === 0) return [];
+  async search(query: string, userId?: string): Promise<SearchResult> {
+    // Run artist DB search and YouTube search in parallel
+    const [artists, youtubeItems] = await Promise.all([
+      searchArtists(query),
+      searchYouTube(query, 10),
+    ]);
+
+    if (youtubeItems.length === 0) return { artists, results: [] };
 
     const videoIds = youtubeItems.map((item) => item.videoId);
 
@@ -238,7 +305,7 @@ export const SearchService = {
       trackByVideoId.set(fileName, formatTrack(track, userId));
     }
 
-    return youtubeItems.map((item) => {
+    const results: YouTubeResult[] = youtubeItems.map((item) => {
       const existing = trackByVideoId.get(item.videoId) ?? null;
       return {
         videoId: item.videoId,
@@ -250,6 +317,8 @@ export const SearchService = {
         track: existing,
       };
     });
+
+    return { artists, results };
   },
 
   async requestTrack(videoId: string, userId?: string): Promise<TrackDto> {
@@ -263,7 +332,9 @@ export const SearchService = {
     const youtubeVideo = await fetchSingleVideo(videoId);
     if (!youtubeVideo) throw createError("YouTube video not found", 404);
 
-    const musicDir = path.resolve(process.env.MUSIC_DIR ?? "./music");
+    const musicDir = path.resolve(
+      process.env.MUSIC_DIR ?? "/home/frank-loui-lapore/vibestream/audio",
+    );
     await downloadToMusicDir(videoId, musicDir);
 
     const mp3Path = path.resolve(path.join(musicDir, `${videoId}.mp3`));
@@ -271,30 +342,9 @@ export const SearchService = {
       throw createError("Audio conversion failed", 500);
     }
 
-    const infoJsonPath = path.resolve(path.join(musicDir, `${videoId}.info.json`));
-    let infoTitle: string | undefined;
-    let infoDuration: number | undefined;
-
-    if (fs.existsSync(infoJsonPath)) {
-      try {
-        const info = JSON.parse(fs.readFileSync(infoJsonPath, "utf-8")) as {
-          title?: string;
-          duration?: number;
-        };
-        infoTitle = info.title;
-        infoDuration =
-          typeof info.duration === "number" ? Math.round(info.duration) : undefined;
-      } catch {
-        // best effort
-      }
-    }
-
     let artist = await prisma.artist.findFirst({
       where: {
-        name: {
-          equals: youtubeVideo.channelTitle,
-          mode: "insensitive",
-        },
+        name: { equals: youtubeVideo.channelTitle, mode: "insensitive" },
       },
     });
 
@@ -304,13 +354,37 @@ export const SearchService = {
       });
     }
 
+    let album = await prisma.album.findFirst({
+      where: {
+        AND: [
+          { title: { equals: youtubeVideo.channelTitle, mode: "insensitive" } },
+          { artistId: artist.id },
+        ],
+      },
+    });
+
+    if (!album) {
+      album = await prisma.album.create({
+        data: {
+          title: youtubeVideo.channelTitle,
+          coverUrl: youtubeVideo.thumbnailUrl,
+          artistId: artist.id,
+        },
+      });
+    }
+
     const createdTrack = await prisma.track.create({
       data: {
-        title: infoTitle ?? youtubeVideo.title,
-        duration: infoDuration ?? youtubeVideo.duration,
+        title: youtubeVideo.title,
+        duration: youtubeVideo.duration,
         audioUrl: mp3Path,
         coverUrl: youtubeVideo.thumbnailUrl,
         artistId: artist.id,
+        albumId: album.id,
+        genre: youtubeVideo.genre,
+        playCount: youtubeVideo.viewCount
+          ? Math.min(youtubeVideo.viewCount, 2147483647)
+          : 0,
       },
       include: trackInclude,
     });
@@ -318,3 +392,23 @@ export const SearchService = {
     return formatTrack(createdTrack, userId);
   },
 };
+
+async function downloadToMusicDir(videoId: string, musicDir: string): Promise<void> {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const ytdlModule = require("youtube-dl-exec");
+  const ytdl = (ytdlModule.default ?? ytdlModule) as (
+    url: string,
+    options: Record<string, unknown>,
+  ) => Promise<unknown>;
+
+  fs.mkdirSync(musicDir, { recursive: true });
+
+  await ytdl(`https://www.youtube.com/watch?v=${videoId}`, {
+    extractAudio: true,
+    audioFormat: "mp3",
+    audioQuality: 0,
+    output: path.join(musicDir, `${videoId}.%(ext)s`),
+    noPlaylist: true,
+    quiet: true,
+  });
+}

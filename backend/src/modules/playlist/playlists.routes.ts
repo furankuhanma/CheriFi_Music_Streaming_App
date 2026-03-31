@@ -21,6 +21,7 @@ function auth(handler: Handler) {
 
 // ─── Routes (all require auth) ────────────────────────────────────────────────
 
+router.get("/quick-access", requireAuth as any, auth(PlaylistsController.getQuickAccess));
 router.get("/", requireAuth as any, auth(PlaylistsController.getAll));
 router.get("/:id", requireAuth as any, auth(PlaylistsController.getById));
 router.post("/", requireAuth as any, auth(PlaylistsController.create));

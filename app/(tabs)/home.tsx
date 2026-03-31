@@ -8,11 +8,20 @@ import {
   TouchableOpacity,
   Image,
   Dimensions,
+  RefreshControl,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
+import { useRouter } from "expo-router";
 import { usePlayer } from "../context/PlayerContext";
-import { RecommendationsService } from "../services/recommendations.service";
+import {
+  RecommendationsService,
+  HomeFeedSection,
+  HomeFeedTrackSection,
+  HomeFeedAlbumSection,
+  HomeFeedArtistSection,
+  HomeFeedPlaylistSection,
+} from "../services/recommendations.service";
 import { TracksService, Track } from "../services/tracks.service";
 import { PlaylistsService, Playlist } from "../services/playlists.api";
 import PlaylistCover from "../components/PlaylistCover";
@@ -21,6 +30,7 @@ import TrackActionsSheet from "../components/TrackActionsSheet";
 
 const SCREEN_WIDTH = Dimensions.get("window").width;
 const CARD_WIDTH = 140;
+const ARTIST_CARD_WIDTH = 110;
 
 // ─── Greeting ─────────────────────────────────────────────────────────────────
 
@@ -31,7 +41,7 @@ function getGreeting(): string {
   return "Good evening 👋";
 }
 
-// ─── Skeleton: grid card ──────────────────────────────────────────────────────
+// ─── Skeletons ────────────────────────────────────────────────────────────────
 
 function SkeletonGridCard() {
   return (
@@ -44,8 +54,6 @@ function SkeletonGridCard() {
     </View>
   );
 }
-
-// ─── Skeleton: horizontal card ────────────────────────────────────────────────
 
 function SkeletonHCard() {
   return (
@@ -65,8 +73,6 @@ function SkeletonHCard() {
   );
 }
 
-// ─── Skeleton: track row ──────────────────────────────────────────────────────
-
 function SkeletonRow() {
   return (
     <View className="flex-row items-center py-3 px-1">
@@ -79,7 +85,37 @@ function SkeletonRow() {
   );
 }
 
-// ─── Horizontal track card ────────────────────────────────────────────────────
+function SkeletonFeed() {
+  return (
+    <>
+      <View className="mb-8">
+        <View className="h-5 w-40 rounded bg-[#282828] mb-4" />
+        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+          {Array.from({ length: 4 }).map((_, i) => (
+            <SkeletonHCard key={i} />
+          ))}
+        </ScrollView>
+      </View>
+      <View className="mb-8">
+        <View className="h-5 w-32 rounded bg-[#282828] mb-4" />
+        <SkeletonRow />
+        <SkeletonRow />
+        <SkeletonRow />
+        <SkeletonRow />
+      </View>
+      <View className="mb-8">
+        <View className="h-5 w-44 rounded bg-[#282828] mb-4" />
+        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+          {Array.from({ length: 4 }).map((_, i) => (
+            <SkeletonHCard key={i} />
+          ))}
+        </ScrollView>
+      </View>
+    </>
+  );
+}
+
+// ─── Track card (large horizontal) ───────────────────────────────────────────
 
 function TrackCard({
   track,
@@ -127,7 +163,6 @@ function TrackCard({
           <Ionicons name="musical-note" size={36} color="#555" />
         </View>
       )}
-
       <Text
         numberOfLines={1}
         style={{
@@ -142,7 +177,6 @@ function TrackCard({
       <Text numberOfLines={1} style={{ color: "#B3B3B3", fontSize: 11 }}>
         {track.artist.name}
       </Text>
-
       {isActive && (
         <View style={{ position: "absolute", top: 8, right: 8 }}>
           <View
@@ -160,50 +194,7 @@ function TrackCard({
   );
 }
 
-// ─── Horizontal section ───────────────────────────────────────────────────────
-
-function HorizontalSection({
-  title,
-  tracks,
-  isLoading,
-  currentTrackId,
-  onTrackPress,
-  onTrackLongPress,
-}: {
-  title: string;
-  tracks: Track[];
-  isLoading: boolean;
-  currentTrackId: string | null;
-  onTrackPress: (track: Track) => void;
-  onTrackLongPress: (track: Track) => void;
-}) {
-  if (!isLoading && tracks.length === 0) return null;
-
-  return (
-    <View className="mb-8">
-      <Text className="text-white text-xl font-bold mb-4">{title}</Text>
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={{ paddingRight: 16 }}
-      >
-        {isLoading
-          ? Array.from({ length: 4 }).map((_, i) => <SkeletonHCard key={i} />)
-          : tracks.map((track) => (
-              <TrackCard
-                key={track.id}
-                track={track}
-                isActive={track.id === currentTrackId}
-                onPress={() => onTrackPress(track)}
-                onLongPress={() => onTrackLongPress(track)}
-              />
-            ))}
-      </ScrollView>
-    </View>
-  );
-}
-
-// ─── Vertical track row ───────────────────────────────────────────────────────
+// ─── Track row (small vertical) ───────────────────────────────────────────────
 
 function TrackRow({
   track,
@@ -238,7 +229,6 @@ function TrackRow({
           <Ionicons name="musical-note" size={20} color="#B3B3B3" />
         </View>
       )}
-
       <View className="flex-1">
         <Text
           className="font-semibold text-sm mb-0.5"
@@ -251,7 +241,6 @@ function TrackRow({
           {track.artist.name}
         </Text>
       </View>
-
       {isActive && (
         <Ionicons
           name="musical-notes"
@@ -267,60 +256,233 @@ function TrackRow({
   );
 }
 
-// ─── Vertical section ─────────────────────────────────────────────────────────
+// ─── Album card ───────────────────────────────────────────────────────────────
 
-function VerticalSection({
-  title,
-  tracks,
-  isLoading,
-  error,
-  onRetry,
+function AlbumCard({
+  album,
+  onPress,
+}: {
+  album: HomeFeedAlbumSection["albums"][number];
+  onPress: () => void;
+}) {
+  return (
+    <TouchableOpacity
+      onPress={onPress}
+      activeOpacity={0.8}
+      style={{ width: CARD_WIDTH, marginRight: 12 }}
+    >
+      {album.coverUrl ? (
+        <Image
+          source={{ uri: album.coverUrl }}
+          style={{
+            width: CARD_WIDTH,
+            height: CARD_WIDTH,
+            borderRadius: 8,
+            backgroundColor: "#282828",
+            marginBottom: 8,
+          }}
+        />
+      ) : (
+        <View
+          style={{
+            width: CARD_WIDTH,
+            height: CARD_WIDTH,
+            borderRadius: 8,
+            backgroundColor: "#282828",
+            marginBottom: 8,
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <Ionicons name="disc" size={36} color="#555" />
+        </View>
+      )}
+      <Text
+        numberOfLines={1}
+        style={{
+          color: "white",
+          fontSize: 13,
+          fontWeight: "600",
+          marginBottom: 2,
+        }}
+      >
+        {album.title}
+      </Text>
+      <Text numberOfLines={1} style={{ color: "#B3B3B3", fontSize: 11 }}>
+        {album.artist.name}
+      </Text>
+      <Text
+        numberOfLines={1}
+        style={{ color: "#555", fontSize: 10, marginTop: 2 }}
+      >
+        {album.trackCount} {album.trackCount === 1 ? "song" : "songs"}
+      </Text>
+    </TouchableOpacity>
+  );
+}
+
+// ─── Artist card ──────────────────────────────────────────────────────────────
+
+function ArtistCard({
+  artist,
+  onPress,
+}: {
+  artist: HomeFeedArtistSection["artists"][number];
+  onPress: () => void;
+}) {
+  // Use imageUrl if available, fall back to first track's cover, then null
+  const displayImage = artist.imageUrl ?? artist.fallbackCoverUrl ?? null;
+
+  return (
+    <TouchableOpacity
+      onPress={onPress}
+      activeOpacity={0.8}
+      style={{
+        width: ARTIST_CARD_WIDTH,
+        marginRight: 12,
+        alignItems: "center",
+      }}
+    >
+      {displayImage ? (
+        <Image
+          source={{ uri: displayImage }}
+          style={{
+            width: ARTIST_CARD_WIDTH,
+            height: ARTIST_CARD_WIDTH,
+            borderRadius: ARTIST_CARD_WIDTH / 2,
+            backgroundColor: "#282828",
+            marginBottom: 8,
+          }}
+        />
+      ) : (
+        <View
+          style={{
+            width: ARTIST_CARD_WIDTH,
+            height: ARTIST_CARD_WIDTH,
+            borderRadius: ARTIST_CARD_WIDTH / 2,
+            backgroundColor: "#282828",
+            marginBottom: 8,
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <Ionicons name="person" size={36} color="#555" />
+        </View>
+      )}
+      <Text
+        numberOfLines={1}
+        style={{
+          color: "white",
+          fontSize: 12,
+          fontWeight: "600",
+          textAlign: "center",
+        }}
+      >
+        {artist.name}
+      </Text>
+      <Text
+        numberOfLines={1}
+        style={{
+          color: "#555",
+          fontSize: 10,
+          marginTop: 2,
+          textAlign: "center",
+        }}
+      >
+        {artist.trackCount} {artist.trackCount === 1 ? "song" : "songs"}
+      </Text>
+    </TouchableOpacity>
+  );
+}
+
+// ─── Public playlist card ─────────────────────────────────────────────────────
+
+function PublicPlaylistCard({
+  playlist,
+  onPress,
+}: {
+  playlist: HomeFeedPlaylistSection["playlists"][number];
+  onPress: () => void;
+}) {
+  return (
+    <TouchableOpacity
+      onPress={onPress}
+      activeOpacity={0.8}
+      style={{ width: CARD_WIDTH, marginRight: 12 }}
+    >
+      {playlist.coverUrl ? (
+        <Image
+          source={{ uri: playlist.coverUrl }}
+          style={{
+            width: CARD_WIDTH,
+            height: CARD_WIDTH,
+            borderRadius: 8,
+            backgroundColor: "#282828",
+            marginBottom: 8,
+          }}
+        />
+      ) : (
+        <View
+          style={{
+            width: CARD_WIDTH,
+            height: CARD_WIDTH,
+            borderRadius: 8,
+            backgroundColor: "#282828",
+            marginBottom: 8,
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <Ionicons name="musical-notes" size={36} color="#555" />
+        </View>
+      )}
+      <Text
+        numberOfLines={1}
+        style={{
+          color: "white",
+          fontSize: 13,
+          fontWeight: "600",
+          marginBottom: 2,
+        }}
+      >
+        {playlist.title}
+      </Text>
+      <Text numberOfLines={1} style={{ color: "#B3B3B3", fontSize: 11 }}>
+        by {playlist.owner.username}
+      </Text>
+      <Text
+        numberOfLines={1}
+        style={{ color: "#555", fontSize: 10, marginTop: 2 }}
+      >
+        {playlist.trackCount} {playlist.trackCount === 1 ? "song" : "songs"}
+      </Text>
+    </TouchableOpacity>
+  );
+}
+
+// ─── Section renderers ────────────────────────────────────────────────────────
+
+function TrackLargeSection({
+  section,
   currentTrackId,
   onTrackPress,
   onTrackLongPress,
 }: {
-  title: string;
-  tracks: Track[];
-  isLoading: boolean;
-  error: boolean;
-  onRetry: () => void;
+  section: HomeFeedTrackSection;
   currentTrackId: string | null;
   onTrackPress: (track: Track) => void;
   onTrackLongPress: (track: Track) => void;
 }) {
   return (
     <View className="mb-8">
-      <Text className="text-white text-xl font-bold mb-3">{title}</Text>
-
-      {isLoading && (
-        <>
-          <SkeletonRow />
-          <SkeletonRow />
-          <SkeletonRow />
-          <SkeletonRow />
-        </>
-      )}
-
-      {error && !isLoading && (
-        <View className="flex-row items-center bg-[#1E1E1E] rounded-lg p-3">
-          <Ionicons name="warning-outline" size={16} color="#FF4444" />
-          <Text className="text-[#FF4444] text-sm flex-1 ml-2">
-            Couldn't load tracks.
-          </Text>
-          <TouchableOpacity onPress={onRetry}>
-            <Text className="text-[#1DB954] text-sm font-semibold">Retry</Text>
-          </TouchableOpacity>
-        </View>
-      )}
-
-      {!isLoading && !error && tracks.length === 0 && (
-        <Text className="text-[#B3B3B3] text-sm">No tracks found.</Text>
-      )}
-
-      {!isLoading &&
-        !error &&
-        tracks.map((track) => (
-          <TrackRow
+      <Text className="text-white text-xl font-bold mb-4">{section.title}</Text>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={{ paddingRight: 16 }}
+      >
+        {section.tracks.map((track) => (
+          <TrackCard
             key={track.id}
             track={track}
             isActive={track.id === currentTrackId}
@@ -328,132 +490,255 @@ function VerticalSection({
             onLongPress={() => onTrackLongPress(track)}
           />
         ))}
+      </ScrollView>
     </View>
   );
+}
+
+function TrackSmallSection({
+  section,
+  currentTrackId,
+  onTrackPress,
+  onTrackLongPress,
+}: {
+  section: HomeFeedTrackSection;
+  currentTrackId: string | null;
+  onTrackPress: (track: Track) => void;
+  onTrackLongPress: (track: Track) => void;
+}) {
+  return (
+    <View className="mb-8">
+      <Text className="text-white text-xl font-bold mb-3">{section.title}</Text>
+      {section.tracks.map((track) => (
+        <TrackRow
+          key={track.id}
+          track={track}
+          isActive={track.id === currentTrackId}
+          onPress={() => onTrackPress(track)}
+          onLongPress={() => onTrackLongPress(track)}
+        />
+      ))}
+    </View>
+  );
+}
+
+function AlbumSection({ section }: { section: HomeFeedAlbumSection }) {
+  const router = useRouter();
+  return (
+    <View className="mb-8">
+      <Text className="text-white text-xl font-bold mb-4">{section.title}</Text>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={{ paddingRight: 16 }}
+      >
+        {section.albums.map((album) => (
+          <AlbumCard
+            key={album.id}
+            album={album}
+            onPress={() =>
+              router.push({
+                pathname: "/collection",
+                params: {
+                  type: "album",
+                  id: album.id,
+                  title: album.title,
+                  coverUrl: album.coverUrl ?? "",
+                  subtitle: album.artist.name,
+                },
+              })
+            }
+          />
+        ))}
+      </ScrollView>
+    </View>
+  );
+}
+
+function ArtistSection({ section }: { section: HomeFeedArtistSection }) {
+  const router = useRouter();
+  return (
+    <View className="mb-8">
+      <Text className="text-white text-xl font-bold mb-4">{section.title}</Text>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={{ paddingRight: 16 }}
+      >
+        {section.artists.map((artist) => (
+          <ArtistCard
+            key={artist.id}
+            artist={artist}
+            onPress={() =>
+              router.push({
+                pathname: "/collection",
+                params: {
+                  type: "artist",
+                  id: artist.id,
+                  title: artist.name,
+                  coverUrl: artist.imageUrl ?? artist.fallbackCoverUrl ?? "",
+                },
+              })
+            }
+          />
+        ))}
+      </ScrollView>
+    </View>
+  );
+}
+
+function PlaylistSection({ section }: { section: HomeFeedPlaylistSection }) {
+  const router = useRouter();
+  return (
+    <View className="mb-8">
+      <Text className="text-white text-xl font-bold mb-4">{section.title}</Text>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={{ paddingRight: 16 }}
+      >
+        {section.playlists.map((playlist) => (
+          <PublicPlaylistCard
+            key={playlist.id}
+            playlist={playlist}
+            onPress={() =>
+              router.push({
+                pathname: "/collection",
+                params: {
+                  type: "playlist",
+                  id: playlist.id,
+                  title: playlist.title,
+                  coverUrl: playlist.coverUrl ?? "",
+                  subtitle: `by ${playlist.owner.username}`,
+                },
+              })
+            }
+          />
+        ))}
+      </ScrollView>
+    </View>
+  );
+}
+
+// ─── Dynamic section dispatcher ───────────────────────────────────────────────
+
+function FeedSection({
+  section,
+  currentTrackId,
+  onTrackPress,
+  onTrackLongPress,
+}: {
+  section: HomeFeedSection;
+  currentTrackId: string | null;
+  onTrackPress: (track: Track) => void;
+  onTrackLongPress: (track: Track) => void;
+}) {
+  if (section.type === "tracks" && section.variant === "large") {
+    return (
+      <TrackLargeSection
+        section={section}
+        currentTrackId={currentTrackId}
+        onTrackPress={onTrackPress}
+        onTrackLongPress={onTrackLongPress}
+      />
+    );
+  }
+  if (section.type === "tracks" && section.variant === "small") {
+    return (
+      <TrackSmallSection
+        section={section}
+        currentTrackId={currentTrackId}
+        onTrackPress={onTrackPress}
+        onTrackLongPress={onTrackLongPress}
+      />
+    );
+  }
+  if (section.type === "albums") {
+    return <AlbumSection section={section} />;
+  }
+  if (section.type === "artists") {
+    return <ArtistSection section={section} />;
+  }
+  if (section.type === "playlists") {
+    return <PlaylistSection section={section} />;
+  }
+  return null;
 }
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
 export default function HomeScreen() {
-  const {
-    playTrack,
-    currentTrack,
-    addToQueue,
-    addToQueueNext,
-    isLiked,
-    toggleLike,
-  } = usePlayer();
+  const router = useRouter();
+  const { playTrack, currentTrack, addToQueue, addToQueueNext, toggleLike } =
+    usePlayer();
 
-  // Vertical sections
-  const [forYou, setForYou] = useState<Track[]>([]);
-  const [popular, setPopular] = useState<Track[]>([]);
-  const [forYouLoading, setForYouLoading] = useState(true);
-  const [popularLoading, setPopularLoading] = useState(true);
-  const [forYouError, setForYouError] = useState(false);
-  const [popularError, setPopularError] = useState(false);
+  const [feedSections, setFeedSections] = useState<HomeFeedSection[]>([]);
+  const [feedLoading, setFeedLoading] = useState(true);
+  const [feedError, setFeedError] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
-  // Horizontal sections
-  const [liked, setLiked] = useState<Track[]>([]);
-  const [recentlyPlayed, setRecentlyPlayed] = useState<Track[]>([]);
-  const [likedLoading, setLikedLoading] = useState(true);
-  const [recentLoading, setRecentLoading] = useState(true);
-
-  // Playlist grid
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
   const [playlistsLoading, setPlaylistsLoading] = useState(true);
 
-  // Action sheet / modal
   const [selectedTrack, setSelectedTrack] = useState<Track | null>(null);
   const [sheetVisible, setSheetVisible] = useState(false);
   const [playlistTrackId, setPlaylistTrackId] = useState<string | null>(null);
   const [playlistModalVisible, setPlaylistModalVisible] = useState(false);
   const [likedIds, setLikedIds] = useState<Set<string>>(new Set());
 
-  // ── Loaders ─────────────────────────────────────────────────────────────────
+  // ── Loaders ──────────────────────────────────────────────────────────────────
 
-  const loadForYou = async () => {
-    setForYouLoading(true);
-    setForYouError(false);
+  const loadFeed = useCallback(async () => {
+    setFeedError(false);
     try {
-      const tracks = await RecommendationsService.smart();
-      setForYou(tracks);
-      setLikedIds((prev) => {
-        const next = new Set(prev);
-        tracks.forEach((t) => {
-          if (t.isLiked) next.add(t.id);
-        });
-        return next;
+      const sections = await RecommendationsService.homeFeed();
+      setFeedSections(sections);
+      sections.forEach((section) => {
+        if (section.type === "tracks") {
+          setLikedIds((prev) => {
+            const next = new Set(prev);
+            section.tracks.forEach((t) => {
+              if (t.isLiked) next.add(t.id);
+            });
+            return next;
+          });
+        }
       });
-    } catch {
-      setForYouError(true);
-    } finally {
-      setForYouLoading(false);
+    } catch (e) {
+      console.log("feed error:", e);
+      setFeedError(true);
     }
-  };
+  }, []);
 
-  const loadPopular = async () => {
-    setPopularLoading(true);
-    setPopularError(false);
-    try {
-      const tracks = await RecommendationsService.popular();
-      setPopular(tracks);
-      setLikedIds((prev) => {
-        const next = new Set(prev);
-        tracks.forEach((t) => {
-          if (t.isLiked) next.add(t.id);
-        });
-        return next;
-      });
-    } catch {
-      setPopularError(true);
-    } finally {
-      setPopularLoading(false);
-    }
-  };
-
-  const loadLiked = async () => {
-    setLikedLoading(true);
-    try {
-      const tracks = await TracksService.getLiked(20);
-      setLiked(tracks);
-    } catch {
-      // silently fail — section just won't show
-    } finally {
-      setLikedLoading(false);
-    }
-  };
-
-  const loadRecentlyPlayed = async () => {
-    setRecentLoading(true);
-    try {
-      const tracks = await TracksService.getRecentlyPlayed(20);
-      setRecentlyPlayed(tracks);
-    } catch {
-      // silently fail
-    } finally {
-      setRecentLoading(false);
-    }
-  };
-
-  const loadPlaylists = async () => {
+  const loadPlaylists = useCallback(async () => {
     setPlaylistsLoading(true);
     try {
-      const data = await PlaylistsService.getAll();
-      setPlaylists(data.slice(0, 4));
+      const data = await PlaylistsService.getQuickAccess(4);
+      setPlaylists(data);
     } catch {
       // silently fail
     } finally {
       setPlaylistsLoading(false);
     }
-  };
+  }, []);
+
+  const loadAll = useCallback(async () => {
+    setFeedLoading(true);
+    await Promise.all([loadFeed(), loadPlaylists()]);
+    setFeedLoading(false);
+  }, [loadFeed, loadPlaylists]);
 
   useEffect(() => {
-    loadForYou();
-    loadPopular();
-    loadLiked();
-    loadRecentlyPlayed();
-    loadPlaylists();
+    loadAll();
   }, []);
+
+  // ── Pull-to-refresh ───────────────────────────────────────────────────────────
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await Promise.all([loadFeed(), loadPlaylists()]);
+    setRefreshing(false);
+  }, [loadFeed, loadPlaylists]);
 
   // ── Handlers ─────────────────────────────────────────────────────────────────
 
@@ -491,7 +776,17 @@ export default function HomeScreen() {
 
   return (
     <SafeAreaView className="flex-1 bg-[#121212]">
-      <ScrollView className="px-4 pt-6" showsVerticalScrollIndicator={false}>
+      <ScrollView
+        className="px-4 pt-6"
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor="#1DB954"
+          />
+        }
+      >
         {/* Greeting */}
         <Text className="text-white text-2xl font-bold mb-6">
           {getGreeting()}
@@ -509,6 +804,18 @@ export default function HomeScreen() {
                     key={playlist.id}
                     className="bg-[#282828] rounded-md flex-row items-center overflow-hidden"
                     style={{ width: "48%", height: 56 }}
+                    onPress={() =>
+                      router.push({
+                        pathname: "/collection",
+                        params: {
+                          type: "playlist",
+                          id: playlist.id,
+                          title: playlist.title,
+                          coverUrl: playlist.coverUrl ?? "",
+                          subtitle: `by ${playlist.owner?.username ?? "Unknown"}`,
+                        },
+                      })
+                    }
                   >
                     <PlaylistCover playlist={playlist} size={56} rounded={0} />
                     <Text
@@ -522,49 +829,36 @@ export default function HomeScreen() {
           </View>
         )}
 
-        {/* ── Recently Liked — horizontal swipeable cards ── */}
-        <HorizontalSection
-          title="Recently Liked"
-          tracks={liked}
-          isLoading={likedLoading}
-          currentTrackId={currentTrack?.id ?? null}
-          onTrackPress={playTrack}
-          onTrackLongPress={handleLongPress}
-        />
+        {/* ── Feed loading skeleton ── */}
+        {feedLoading && <SkeletonFeed />}
 
-        {/* ── Jump Back In — horizontal swipeable cards ── */}
-        <HorizontalSection
-          title="Jump Back In"
-          tracks={recentlyPlayed}
-          isLoading={recentLoading}
-          currentTrackId={currentTrack?.id ?? null}
-          onTrackPress={playTrack}
-          onTrackLongPress={handleLongPress}
-        />
+        {/* ── Feed error ── */}
+        {feedError && !feedLoading && (
+          <View className="flex-row items-center bg-[#1E1E1E] rounded-lg p-3 mb-8">
+            <Ionicons name="warning-outline" size={16} color="#FF4444" />
+            <Text className="text-[#FF4444] text-sm flex-1 ml-2">
+              Couldn't load your feed.
+            </Text>
+            <TouchableOpacity onPress={loadAll}>
+              <Text className="text-[#1DB954] text-sm font-semibold">
+                Retry
+              </Text>
+            </TouchableOpacity>
+          </View>
+        )}
 
-        {/* ── For You — vertical track list ── */}
-        <VerticalSection
-          title="For You"
-          tracks={forYou}
-          isLoading={forYouLoading}
-          error={forYouError}
-          onRetry={loadForYou}
-          currentTrackId={currentTrack?.id ?? null}
-          onTrackPress={playTrack}
-          onTrackLongPress={handleLongPress}
-        />
-
-        {/* ── Popular — vertical track list ── */}
-        <VerticalSection
-          title="Popular"
-          tracks={popular}
-          isLoading={popularLoading}
-          error={popularError}
-          onRetry={loadPopular}
-          currentTrackId={currentTrack?.id ?? null}
-          onTrackPress={playTrack}
-          onTrackLongPress={handleLongPress}
-        />
+        {/* ── Dynamic feed sections ── */}
+        {!feedLoading &&
+          !feedError &&
+          feedSections.map((section, index) => (
+            <FeedSection
+              key={`${section.type}-${section.title}-${index}`}
+              section={section}
+              currentTrackId={currentTrack?.id ?? null}
+              onTrackPress={playTrack}
+              onTrackLongPress={handleLongPress}
+            />
+          ))}
 
         <View style={{ height: 100 }} />
       </ScrollView>

@@ -18,6 +18,7 @@ model User {
   passwordHash String?  // null for OAuth-only users
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
+  songRequests  SongRequest[]
 
   // Relations
   oauthAccounts OAuthAccount[]
@@ -103,6 +104,7 @@ model Track {
   library     LibraryTrack[]
   playlistTracks PlaylistTrack[]
   playHistory PlayHistory[]
+  songRequests  SongRequest[]
 
   @@map("tracks")
 }
@@ -172,4 +174,42 @@ model PlayHistory {
   track Track @relation(fields: [trackId], references: [id], onDelete: Cascade)
 
   @@map("play_history")
+}
+
+model SongRequest {
+  id               String   @id @default(uuid())
+  userId           String
+
+  // Raw input from user
+  rawInput         String
+
+  // Normalized & analyzed fields
+  normalizedTitle  String
+  normalizedArtist String
+  albumHint        String?
+
+  // Analysis result
+  confidence       Float    @default(0)
+  status           SongRequestStatus @default(PENDING)
+  notes            String?  // collaborators, extra info, reject reason
+
+  // If fulfilled by an existing or newly created track
+  fulfilledTrackId String?
+
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fulfilledTrack   Track?   @relation(fields: [fulfilledTrackId], references: [id], onDelete: SetNull)
+
+  @@index([status])
+  @@index([userId])
+  @@index([normalizedTitle, normalizedArtist])
+  @@map("song_requests")
+}
+
+enum SongRequestStatus {
+  PENDING
+  FULFILLED
+  REJECTED
 }

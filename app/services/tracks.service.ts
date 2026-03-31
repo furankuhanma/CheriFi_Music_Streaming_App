@@ -89,4 +89,18 @@ export const TracksService = {
   async unlike(trackId: string): Promise<void> {
     await api.delete(`/tracks/${trackId}/like`);
   },
+
+  async getByAlbum(albumId: string): Promise<Track[]> {
+    const res = await api.get<{ success: boolean; data: Track[] }>(
+      `/tracks/album/${albumId}`,
+    );
+    return res.data ?? [];
+  },
+
+  async getByArtist(artistId: string): Promise<Track[]> {
+    const res = await api.get<{ success: boolean; data: Track[] }>(
+      `/tracks/artist/${artistId}`,
+    );
+    return res.data ?? [];
+  },
 };

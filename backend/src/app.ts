@@ -1,11 +1,3 @@
-// backend/src/app.ts
-// Add these two lines alongside your existing route imports/registrations:
-//
-//   import playlistsRoutes from "./modules/playlist/playlists.routes";
-//   app.use("/api/playlists", playlistsRoutes);
-//
-// ─── Full updated file ────────────────────────────────────────────────────────
-
 import express from "express";
 import cors from "cors";
 import helmet from "helmet";
@@ -17,6 +9,7 @@ import authRoutes from "./modules/auth/auth.routes";
 import tracksRoutes from "./modules/tracks/tracks.routes";
 import recommendationsRoutes from "./modules/recommendations/recommendations.routes";
 import playlistsRoutes from "./modules/playlist/playlists.routes";
+import songRequestRoutes from "./modules/song-request/songrequest.routes";
 import { errorHandler } from "./middleware/errorHandler";
 import searchRoutes from "./modules/search/search.routes";
 
@@ -44,8 +37,6 @@ const authLimiter = rateLimit({
   max: 20,
   message: { success: false, error: "Too many auth attempts, please try again later" },
   skip: (req) => {
-    // Don't count passive session probes or refresh token housekeeping
-    // as brute-force auth attempts.
     if (req.path === "/me") return true;
     if (req.path === "/refresh") return true;
     return false;
@@ -75,6 +66,7 @@ app.use("/api/tracks", tracksRoutes);
 app.use("/api/recommendations", recommendationsRoutes);
 app.use("/api/playlists", playlistsRoutes);
 app.use("/api/search", searchRoutes);
+app.use("/api/song-requests", songRequestRoutes);
 
 // ── Health check ──────────────────────────────────────────────────────────────
 app.get("/health", (_, res) => {

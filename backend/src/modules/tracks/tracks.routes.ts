@@ -22,6 +22,8 @@ function auth(handler: Handler) {
 
 // Real user library feeds — require auth
 router.get("/downloads", requireAuth as any, auth(TracksController.getDownloads));
+router.get("/album/:albumId", optionalAuth as any, auth(TracksController.getByAlbum));
+router.get("/artist/:artistId", optionalAuth as any, auth(TracksController.getByArtist));
 router.get("/liked", requireAuth as any, auth(TracksController.getLiked));
 router.get(
   "/recently-played",

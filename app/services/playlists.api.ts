@@ -26,13 +26,15 @@ export type PlaylistTrack = {
 export type Playlist = {
   id: string;
   title: string;
-  description: string | null;
+  description?: string | null;
   coverUrl: string | null;
-  userId: string;
-  isPublic: boolean;
-  createdAt: string;
-  updatedAt: string;
-  tracks: PlaylistTrack[];
+  userId?: string;
+  isPublic?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+  tracks?: PlaylistTrack[];
+  owner?: { id: string; username: string };
+  trackCount?: number;
 };
 
 export type UpdatePlaylistPayload = {
@@ -46,6 +48,13 @@ export type UpdatePlaylistPayload = {
 export const PlaylistsService = {
   async getAll(): Promise<Playlist[]> {
     const res = await api.get<{ success: boolean; data: Playlist[] }>("/playlists");
+    return res.data ?? [];
+  },
+
+  async getQuickAccess(limit = 4): Promise<Playlist[]> {
+    const res = await api.get<{ success: boolean; data: Playlist[] }>(
+      `/playlists/quick-access?limit=${limit}`
+    );
     return res.data ?? [];
   },
 

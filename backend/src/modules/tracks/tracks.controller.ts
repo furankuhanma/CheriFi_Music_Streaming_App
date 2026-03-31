@@ -107,4 +107,28 @@ export const TracksController = {
       next(err);
     }
   },
+
+  async getByAlbum(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+    try {
+      const tracks = await TracksService.getByAlbum(
+        req.params.albumId,
+        req.user?.userId,
+      );
+      res.json({ success: true, data: tracks });
+    } catch (err) {
+      next(err);
+    }
+  },
+
+  async getByArtist(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+    try {
+      const tracks = await TracksService.getByArtist(
+        req.params.artistId,
+        req.user?.userId,
+      );
+      res.json({ success: true, data: tracks });
+    } catch (err) {
+      next(err);
+    }
+  },
 };

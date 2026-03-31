@@ -46,6 +46,16 @@ const RecommendationsController = {
       next(err);
     }
   },
+
+  // ── Home feed ────────────────────────────────────────────────────────────────
+  async homeFeed(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+    try {
+      const sections = await RecommendationsService.homeFeed(req.user.userId);
+      res.json({ success: true, data: sections });
+    } catch (err) {
+      next(err);
+    }
+  },
 };
 
 // ─── Routes ───────────────────────────────────────────────────────────────────
@@ -88,4 +98,16 @@ router.get(
     ),
 );
 
-export default router;
+// Home feed — requires auth
+router.get(
+  "/home-feed",
+  requireAuth as any,
+  (req, res, next) =>
+    RecommendationsController.homeFeed(
+      req as unknown as AuthenticatedRequest,
+      res,
+      next,
+    ),
+);
+
+export default router; 

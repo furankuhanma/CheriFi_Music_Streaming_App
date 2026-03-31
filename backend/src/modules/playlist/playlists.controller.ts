@@ -13,6 +13,16 @@ export const PlaylistsController = {
     }
   },
 
+  async getQuickAccess(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+    try {
+      const limit = Math.min(parseInt(req.query.limit as string) || 4, 10);
+      const playlists = await PlaylistsService.getQuickAccessPlaylists(req.user.userId, limit);
+      res.json({ success: true, data: playlists });
+    } catch (err) {
+      next(err);
+    }
+  },
+
   async getById(req: AuthenticatedRequest, res: Response, next: NextFunction) {
     try {
       const playlist = await PlaylistsService.getById(req.params.id, req.user.userId);

@@ -215,4 +215,23 @@ export const TracksService = {
       .delete({ where: { userId_trackId: { userId, trackId } } })
       .catch(() => {}); // ok if it didn't exist
   },
+
+  async getByAlbum(albumId: string, userId?: string): Promise<TrackDto[]> {
+    const tracks = await prisma.track.findMany({
+      where: { albumId },
+      include: trackInclude,
+      orderBy: { title: "asc" },
+    });
+    return tracks.map((t: any) => formatTrack(t, userId));
+  },
+
+  async getByArtist(artistId: string, userId?: string): Promise<TrackDto[]> {
+    const tracks = await prisma.track.findMany({
+      where: { artistId },
+      include: trackInclude,
+      orderBy: { title: "asc" },
+    });
+    return tracks.map((t: any) => formatTrack(t, userId));
+  },
 };
+

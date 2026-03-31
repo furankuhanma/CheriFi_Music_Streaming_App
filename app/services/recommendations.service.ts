@@ -6,6 +6,65 @@ type RecommendationsResponse = {
   data: Track[];
 };
 
+// ─── Home feed section types ──────────────────────────────────────────────────
+
+export type HomeFeedTrackSection = {
+  type: "tracks";
+  variant: "large" | "small";
+  title: string;
+  tracks: Track[];
+};
+
+export type HomeFeedAlbumSection = {
+  type: "albums";
+  title: string;
+  albums: {
+    id: string;
+    title: string;
+    coverUrl: string | null;
+    artist: { id: string; name: string };
+    trackCount: number;
+  }[];
+};
+
+export type HomeFeedArtistSection = {
+  type: "artists";
+  title: string;
+  artists: {
+    id: string;
+    name: string;
+    imageUrl: string | null;
+    fallbackCoverUrl: string | null;
+    trackCount: number;
+  }[];
+};
+
+export type HomeFeedPlaylistSection = {
+  type: "playlists";
+  title: string;
+  playlists: {
+    id: string;
+    title: string;
+    coverUrl: string | null;
+    owner: { id: string; username: string };
+    trackCount: number;
+    tracks?: any[];
+  }[];
+};
+
+export type HomeFeedSection =
+  | HomeFeedTrackSection
+  | HomeFeedAlbumSection
+  | HomeFeedArtistSection
+  | HomeFeedPlaylistSection;
+
+type HomeFeedResponse = {
+  success: boolean;
+  data: HomeFeedSection[];
+};
+
+// ─── Service ──────────────────────────────────────────────────────────────────
+
 export const RecommendationsService = {
   // Personalised — requires user to be logged in
   async forYou(limit = 20): Promise<Track[]> {
@@ -38,5 +97,11 @@ export const RecommendationsService = {
     } catch {
       return RecommendationsService.popular(limit);
     }
+  },
+
+  // Dynamic home feed — returns 4–6 randomised sections per call
+  async homeFeed(): Promise<HomeFeedSection[]> {
+    const res = await api.get<HomeFeedResponse>("/recommendations/home-feed");
+    return res.data;
   },
 };

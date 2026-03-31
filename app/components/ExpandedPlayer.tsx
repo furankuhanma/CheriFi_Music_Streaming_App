@@ -21,8 +21,9 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTrackTransition } from "../hooks/useTrackTransition";
 import QueueSheet from "./QueueSheet";
-import AddToPlaylistModal from "./AddToPlaylistModal"; // ← NEW
+import AddToPlaylistModal from "./AddToPlaylistModal";
 import { useOffline } from "../context/OfflineContext";
+import { useRouter } from "expo-router";
 
 const SCREEN_HEIGHT = Dimensions.get("window").height;
 const DISMISS_THRESHOLD = 120;
@@ -66,6 +67,8 @@ function errorMessage(error: PlaybackErrorType): string {
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function ExpandedPlayer() {
+  const router = useRouter();
+
   const {
     currentTrack,
     isExpanded,
@@ -144,8 +147,6 @@ export default function ExpandedPlayer() {
   // ── Local UI state ────────────────────────────────────────────────────────
   const [showContextMenu, setShowContextMenu] = useState(false);
   const [showQueue, setShowQueue] = useState(false);
-
-  // ── NEW: playlist modal state ─────────────────────────────────────────────
   const [playlistModalVisible, setPlaylistModalVisible] = useState(false);
 
   // ── Seek bar ──────────────────────────────────────────────────────────────
@@ -163,9 +164,6 @@ export default function ExpandedPlayer() {
 
   const seekPanResponder = useRef(
     PanResponder.create({
-      // ── FIX: block seek entirely when track isn't loaded ─────────────────
-      // duration === 0 means nothing is loaded yet; tapping the bar would
-      // seek to 0 and restart the track. Guard both grant and move.
       onStartShouldSetPanResponder: () => durationRef.current > 0,
       onMoveShouldSetPanResponder: () => durationRef.current > 0,
 
@@ -222,8 +220,39 @@ export default function ExpandedPlayer() {
   const progress = duration > 0 ? (displayPosition / duration) * 100 : 0;
   const repeat = repeatIcon(repeatMode);
 
-  // ── Seek bar opacity — dim when not loaded ────────────────────────────────
   const seekBarOpacity = duration > 0 ? 1 : 0.4;
+
+  // ── Navigation helpers ────────────────────────────────────────────────────
+
+  const goToArtist = useCallback(() => {
+    setShowContextMenu(false);
+    setIsExpanded(false);
+    router.push({
+      pathname: "/collection",
+      params: {
+        type: "artist",
+        id: currentTrack.artist.id,
+        title: currentTrack.artist.name,
+        coverUrl: "",
+      },
+    });
+  }, [currentTrack, router, setIsExpanded]);
+
+  const goToAlbum = useCallback(() => {
+    if (!currentTrack.album) return;
+    setShowContextMenu(false);
+    setIsExpanded(false);
+    router.push({
+      pathname: "/collection",
+      params: {
+        type: "album",
+        id: currentTrack.album.id,
+        title: currentTrack.album.title,
+        coverUrl: currentTrack.coverUrl ?? "",
+        subtitle: currentTrack.artist.name,
+      },
+    });
+  }, [currentTrack, router, setIsExpanded]);
 
   // ── Play button ───────────────────────────────────────────────────────────
   const renderPlayButton = () => {
@@ -504,7 +533,7 @@ export default function ExpandedPlayer() {
             { name: "decrement", label: "Skip back 10 seconds" },
           ]}
           onAccessibilityAction={(event) => {
-            if (duration === 0) return; // ← FIX: also guard accessibility actions
+            if (duration === 0) return;
             if (event.nativeEvent.actionName === "increment") {
               seekTo(Math.min(displayPosition + 10000, duration));
             } else if (event.nativeEvent.actionName === "decrement") {
@@ -538,7 +567,7 @@ export default function ExpandedPlayer() {
               />
             </View>
 
-            {/* Thumb — only show once duration is known */}
+            {/* Thumb */}
             {duration > 0 && (isSeeking || seekBarWidthRef.current > 0) && (
               <View
                 style={{
@@ -672,7 +701,6 @@ export default function ExpandedPlayer() {
             accessibilityLabel="Share track"
             accessibilityHint="Double tap to share this track"
           />
-          {/* ── CHANGED: open AddToPlaylistModal instead of Alert ─────────── */}
           <IconButton
             name="add-circle-outline"
             size={22}
@@ -717,7 +745,7 @@ export default function ExpandedPlayer() {
       {/* Queue Sheet */}
       <QueueSheet visible={showQueue} onClose={() => setShowQueue(false)} />
 
-      {/* Add to Playlist Modal — NEW */}
+      {/* Add to Playlist Modal */}
       <AddToPlaylistModal
         trackId={currentTrack.id}
         visible={playlistModalVisible}
@@ -759,41 +787,75 @@ export default function ExpandedPlayer() {
           >
             {currentTrack.title}
           </Text>
-          {[
-            { icon: "musical-notes-outline", label: "Go to Album" },
-            { icon: "person-outline", label: "Go to Artist" },
-            { icon: "radio-outline", label: "Go to Song Radio" },
-            { icon: "flag-outline", label: "Report Track" },
-          ].map(({ icon, label }) => (
+
+          {/* Go to Artist */}
+          <TouchableOpacity
+            onPress={goToArtist}
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              paddingVertical: 14,
+            }}
+            accessibilityRole="button"
+            accessibilityLabel="Go to Artist"
+          >
+            <Ionicons
+              name="person-outline"
+              size={22}
+              color="white"
+              style={{ marginRight: 16 }}
+              accessibilityElementsHidden
+            />
+            <Text style={{ color: "white", fontSize: 15 }}>Go to Artist</Text>
+          </TouchableOpacity>
+
+          {/* Go to Album — only shown if track has an album */}
+          {currentTrack.album && (
             <TouchableOpacity
-              key={label}
-              onPress={() => {
-                setShowContextMenu(false);
-                Alert.alert(label, `${label} coming soon`);
-              }}
+              onPress={goToAlbum}
               style={{
                 flexDirection: "row",
                 alignItems: "center",
                 paddingVertical: 14,
               }}
               accessibilityRole="button"
-              accessibilityLabel={label}
+              accessibilityLabel="Go to Album"
             >
               <Ionicons
-                name={icon as any}
+                name="musical-notes-outline"
                 size={22}
                 color="white"
                 style={{ marginRight: 16 }}
                 accessibilityElementsHidden
               />
-              <Text
-                style={{ color: "white", fontSize: 15 }}
-                accessibilityElementsHidden
-              >
-                {label}
-              </Text>
+              <Text style={{ color: "white", fontSize: 15 }}>Go to Album</Text>
             </TouchableOpacity>
-          ))}
+          )}
+
+          {/* Report Track */}
+          <TouchableOpacity
+            onPress={() => {
+              setShowContextMenu(false);
+              Alert.alert("Report Track", "Report Track coming soon");
+            }}
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              paddingVertical: 14,
+            }}
+            accessibilityRole="button"
+            accessibilityLabel="Report Track"
+          >
+            <Ionicons
+              name="flag-outline"
+              size={22}
+              color="white"
+              style={{ marginRight: 16 }}
+              accessibilityElementsHidden
+            />
+            <Text style={{ color: "white", fontSize: 15 }}>Report Track</Text>
+          </TouchableOpacity>
+
           <TouchableOpacity
             onPress={() => setShowContextMenu(false)}
             style={{ marginTop: 8, alignItems: "center", paddingVertical: 12 }}
