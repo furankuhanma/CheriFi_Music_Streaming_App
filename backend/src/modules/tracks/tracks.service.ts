@@ -11,7 +11,7 @@ function formatTrack(track: any, userId?: string): TrackDto {
     id: track.id,
     title: track.title,
     duration: track.duration,
-    audioUrl: `/api/tracks/${track.id}/stream`,
+    audioUrl: `${process.env.API_BASE_URL}/api/tracks/${track.id}/stream`,
     coverUrl: track.coverUrl ?? track.album?.coverUrl ?? null,
     artist: { id: track.artist.id, name: track.artist.name },
     album: track.album
