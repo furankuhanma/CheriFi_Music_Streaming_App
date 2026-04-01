@@ -1,9 +1,27 @@
 // backend/src/modules/playlist/playlists.service.ts
 import { prisma } from "../../config/db";
 
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+/**
+ * Format a track's audioUrl to a full streaming URL in playlist responses
+ */
+function formatPlaylistTracks(playlist: any) {
+  return {
+    ...playlist,
+    tracks: playlist.tracks?.map((pt: any) => ({
+      ...pt,
+      track: {
+        ...pt.track,
+        audioUrl: `${process.env.API_BASE_URL}/api/tracks/${pt.track.id}/stream`,
+      },
+    })) || [],
+  };
+}
+
 export const PlaylistsService = {
   async getUserPlaylists(userId: string) {
-    return prisma.playlist.findMany({
+    const playlists = await prisma.playlist.findMany({
       where: { userId },
       orderBy: { createdAt: "desc" },
       include: {
@@ -20,10 +38,12 @@ export const PlaylistsService = {
         },
       },
     });
+
+    return playlists.map(formatPlaylistTracks);
   },
 
   async getById(playlistId: string, userId: string) {
-    return prisma.playlist.findFirst({
+    const playlist = await prisma.playlist.findFirst({
       where: {
         id: playlistId,
         OR: [{ userId }, { isPublic: true }],
@@ -42,6 +62,8 @@ export const PlaylistsService = {
         },
       },
     });
+
+    return playlist ? formatPlaylistTracks(playlist) : null;
   },
 
   async create(

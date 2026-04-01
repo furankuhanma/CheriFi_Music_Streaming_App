@@ -18,9 +18,28 @@ const app = express();
 
 // ── Security ──────────────────────────────────────────────────────────────────
 app.use(helmet());
+
+// ── CORS Configuration for Production ──────────────────────────────────────────
+// Mobile apps (React Native Expo) may not send Origin headers consistently,
+// so we allow requests with proper auth tokens or from known origins.
+// In production, CLIENT_URL should be set to the actual domain.
 app.use(
   cors({
-    origin: process.env.CLIENT_URL ?? "http://localhost:8081",
+    origin: (origin, callback) => {
+      const allowedOrigins = [
+        process.env.CLIENT_URL,
+        "http://localhost:8081", // Development
+        "http://localhost:3000",  // Development
+        "http://127.0.0.1:8081",  // Development
+      ].filter(Boolean);
+
+      // Allow requests with no origin (common in mobile apps, preflight requests)
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error("CORS not allowed"), false);
+      }
+    },
     credentials: true,
   }),
 );
@@ -29,8 +48,10 @@ app.use(
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 200,
-  message: { success: false, error: "Too many requests, please try again later" },
-});
+  message: { success: false, error: "Too many requests, please try again later" },  skip: (req) => {
+    // Don't rate limit health checks and static files
+    return req.path === "/health" || req.path.startsWith("/uploads");
+  },});
 
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
