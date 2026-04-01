@@ -18,6 +18,10 @@ import {
   OfflineService,
 } from "../services/offline.service";
 
+const BASE_URL = (
+  process.env.EXPO_PUBLIC_API_URL ?? "https://api.clever-systems.com/api"
+).replace("/api", "");
+
 type PlaylistOfflineStatus = {
   isMarkedOffline: boolean;
   downloadedCount: number;
@@ -214,7 +218,9 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
 
   const markPlaylistOffline = useCallback(
     async (playlist: Playlist) => {
-      const trackIds = playlist.tracks.map((t) => t.trackId);
+      const tracks = playlist.tracks ?? [];
+      const trackIds = tracks.map((t) => t.trackId);
+
       const nextPlaylists = {
         ...offlinePlaylists,
         [playlist.id]: {
@@ -225,7 +231,7 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
       };
       await persistPlaylists(nextPlaylists);
 
-      for (const item of playlist.tracks) {
+      for (const item of tracks) {
         const t = item.track;
         const track: Track = {
           id: t.id,
@@ -260,8 +266,9 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
 
   const getPlaylistOfflineStatus = useCallback(
     (playlist: Playlist): PlaylistOfflineStatus => {
-      const totalCount = playlist.tracks.length;
-      const downloadedCount = playlist.tracks.filter((item) =>
+      const tracks = playlist.tracks ?? [];
+      const totalCount = tracks.length;
+      const downloadedCount = tracks.filter((item) =>
         isTrackDownloaded(item.trackId),
       ).length;
 
@@ -281,13 +288,10 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
       const timeout = setTimeout(() => controller.abort(), 2500);
 
       try {
-        const res = await fetch(
-          "https://frank-loui-lapore-hp-probook-640-g1.tail11c2e9.ts.net/health",
-          {
-            method: "GET",
-            signal: controller.signal,
-          },
-        );
+        const res = await fetch(`${BASE_URL}/health`, {
+          method: "GET",
+          signal: controller.signal,
+        });
         setIsOnline(res.ok);
       } catch {
         setIsOnline(false);

@@ -6,3 +6,7 @@ uploads/*.m4a
 uploads/*.wav
 uploads/*.flac
 *.log
+
+.env
+.env*.local
+backend/.env

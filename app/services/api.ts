@@ -4,7 +4,7 @@ import { AuthStore } from "../../stores/auth.store";
 // Use your machine's local IP so the phone/emulator can reach the backend.
 // Find it with: ip addr show | grep "inet " (Linux) or ipconfig (Windows)
 // Replace with your actual local IP when testing on a real device.
-const BASE_URL = "https://frank-loui-lapore-hp-probook-640-g1.tail11c2e9.ts.net/api";
+const BASE_URL = process.env.EXPO_PUBLIC_API_URL;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
