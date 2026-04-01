@@ -144,6 +144,20 @@ export const TracksService = {
 
     const stat = fs.statSync(filePath);
     const fileSize = stat.size;
+
+    // Handle HEAD requests (connectivity checks from player)
+    if (req.method === "HEAD") {
+      res.writeHead(200, {
+        "Content-Length": fileSize,
+        "Content-Type": "audio/mpeg",
+        "Accept-Ranges": "bytes",
+        "Access-Control-Allow-Origin": req.headers.origin || "*",
+        "Access-Control-Allow-Methods": "GET, HEAD",
+      });
+      res.end();
+      return;
+    }
+
     const range = req.headers.range;
 
     if (range) {
@@ -157,6 +171,8 @@ export const TracksService = {
         "Accept-Ranges": "bytes",
         "Content-Length": chunkSize,
         "Content-Type": "audio/mpeg",
+        "Access-Control-Allow-Origin": req.headers.origin || "*",
+        "Access-Control-Allow-Methods": "GET, HEAD",
       });
 
       fs.createReadStream(filePath, { start, end }).pipe(res);
@@ -165,6 +181,8 @@ export const TracksService = {
         "Content-Length": fileSize,
         "Content-Type": "audio/mpeg",
         "Accept-Ranges": "bytes",
+        "Access-Control-Allow-Origin": req.headers.origin || "*",
+        "Access-Control-Allow-Methods": "GET, HEAD",
       });
 
       fs.createReadStream(filePath).pipe(res);

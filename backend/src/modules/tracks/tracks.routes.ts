@@ -34,11 +34,12 @@ router.get(
 // List all tracks — optional auth to include isLiked/inLibrary
 router.get("/", optionalAuth as any, auth(TracksController.getAll));
 
+// Stream audio — public so expo-av can fetch without auth header issues
+// MUST come before /:id route to prevent matching as part of id
+router.get("/:id/stream", auth(TracksController.stream));
+
 // Get single track metadata
 router.get("/:id", optionalAuth as any, auth(TracksController.getById));
-
-// Stream audio — public so expo-av can fetch without auth header issues
-router.get("/:id/stream", auth(TracksController.stream));
 
 // Record a play — requires auth
 router.post("/:id/play", requireAuth as any, auth(TracksController.recordPlay));
