@@ -3,18 +3,27 @@ name: Deploy to Home Server
 on:
   push:
     branches:
-      - main # triggers on push to main
+      - main
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Deploy via SSH
+      - name: Install cloudflared
+        run: |
+          curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb -o cloudflared.deb
+          sudo dpkg -i cloudflared.deb
+
+      - name: Deploy via SSH over Cloudflare Tunnel
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host: ${{ secrets.SERVER_HOST }}
+          host: ssh.clever-systems.com
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
-          port: ${{ secrets.SERVER_PORT }}
+          port: 22
           script: ~/deploy.sh
+          proxy_host: ssh.clever-systems.com
+          proxy_port: 443
+          proxy_key: ${{ secrets.SERVER_SSH_KEY }}
+          proxy_username: ${{ secrets.SERVER_USER }}
