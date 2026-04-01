@@ -290,10 +290,16 @@ export const SearchService = {
 
     const videoIds = youtubeItems.map((item) => item.videoId);
 
+    // FIX: resolve musicDir the same way requestTrack does so the contains
+    // check matches the exact path format stored in the DB
+    const musicDir = path.resolve(
+      process.env.MUSIC_DIR ?? "/home/jarvis/vibestream/audio",
+    );
+
     const existingTracks = await prisma.track.findMany({
       where: {
         OR: videoIds.map((videoId) => ({
-          audioUrl: { contains: videoId },
+          audioUrl: path.join(musicDir, `${videoId}.mp3`),
         })),
       },
       include: trackInclude,
@@ -301,8 +307,9 @@ export const SearchService = {
 
     const trackByVideoId = new Map<string, TrackDto>();
     for (const track of existingTracks) {
-      const fileName = path.basename(track.audioUrl, path.extname(track.audioUrl));
-      trackByVideoId.set(fileName, formatTrack(track, userId));
+      // Extract videoId from the stored absolute path  e.g. /home/jarvis/.../yzTuBuRdAyA.mp3
+      const videoId = path.basename(track.audioUrl, path.extname(track.audioUrl));
+      trackByVideoId.set(videoId, formatTrack(track, userId));
     }
 
     const results: YouTubeResult[] = youtubeItems.map((item) => {
@@ -322,8 +329,16 @@ export const SearchService = {
   },
 
   async requestTrack(videoId: string, userId?: string): Promise<TrackDto> {
+    // FIX: resolve musicDir and mp3Path FIRST so we can use the exact path
+    // for the duplicate check — matching how the path is stored in the DB
+    const musicDir = path.resolve(
+      process.env.MUSIC_DIR ?? "/home/jarvis/vibestream/audio",
+    );
+    const mp3Path = path.resolve(path.join(musicDir, `${videoId}.mp3`));
+
+    // FIX: check by exact audioUrl path instead of a loose `contains` check
     const existing = await prisma.track.findFirst({
-      where: { audioUrl: { contains: videoId } },
+      where: { audioUrl: mp3Path },
       include: trackInclude,
     });
 
@@ -332,12 +347,8 @@ export const SearchService = {
     const youtubeVideo = await fetchSingleVideo(videoId);
     if (!youtubeVideo) throw createError("YouTube video not found", 404);
 
-    const musicDir = path.resolve(
-      process.env.MUSIC_DIR ?? "/home/frank-loui-lapore/vibestream/audio",
-    );
     await downloadToMusicDir(videoId, musicDir);
 
-    const mp3Path = path.resolve(path.join(musicDir, `${videoId}.mp3`));
     if (!fs.existsSync(mp3Path)) {
       throw createError("Audio conversion failed", 500);
     }
