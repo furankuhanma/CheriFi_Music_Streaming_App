@@ -7,23 +7,8 @@ on:
 
 jobs:
   deploy:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
 
     steps:
-      - name: Install cloudflared
-        run: |
-          curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb -o cloudflared.deb
-          sudo dpkg -i cloudflared.deb
-
-      - name: Deploy via SSH over Cloudflare Tunnel
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ssh.clever-systems.com
-          username: ${{ secrets.SERVER_USER }}
-          key: ${{ secrets.SERVER_SSH_KEY }}
-          port: 22
-          script: ~/deploy.sh
-          proxy_host: ssh.clever-systems.com
-          proxy_port: 443
-          proxy_key: ${{ secrets.SERVER_SSH_KEY }}
-          proxy_username: ${{ secrets.SERVER_USER }}
+      - name: Deploy
+        run: ~/deploy.sh
