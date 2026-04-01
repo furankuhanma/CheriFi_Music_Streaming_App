@@ -411,15 +411,14 @@ index b2409a0..0a6999b 100644
 +    } }
  }
 diff --git a/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/trackplayer/service/MusicService.kt b/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/trackplayer/service/MusicService.kt
+index afa6b0f..c64296c 100644
 --- a/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/trackplayer/service/MusicService.kt
 +++ b/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/trackplayer/service/MusicService.kt
-@@ -743,16 +743,22 @@ class MusicService : HeadlessJsTaskService() {
+@@ -741,7 +741,13 @@ class MusicService : HeadlessJsTaskService() {
  
      @MainThread
      private fun emit(event: String, data: Bundle? = null) {
 -        reactNativeHost.reactInstanceManager.currentReactContext
--            ?.getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
--            ?.emit(event, data?.let { Arguments.fromBundle(it) })
 +        // Use the parent-class `reactContext` property which resolves the
 +        // correct React context on both the old bridge and the New Architecture
 +        // (bridgeless / TurboModules). The previous code called
@@ -427,19 +426,15 @@ diff --git a/node_modules/react-native-track-player/android/src/main/java/com/do
 +        // returns null in bridgeless mode, silently dropping every event and
 +        // making notification controls non-functional.
 +        reactContext
-+            ?.getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
-+            ?.emit(event, data?.let { Arguments.fromBundle(it) })
+             ?.getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+             ?.emit(event, data?.let { Arguments.fromBundle(it) })
      }
- 
-     @MainThread
-     private fun emitList(event: String, data: List<Bundle> = emptyList()) {
+@@ -751,7 +757,7 @@ class MusicService : HeadlessJsTaskService() {
          val payload = Arguments.createArray()
          data.forEach { payload.pushMap(Arguments.fromBundle(it)) }
  
 -        reactNativeHost.reactInstanceManager.currentReactContext
--            ?.getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
--            ?.emit(event, payload)
 +        reactContext
-+            ?.getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
-+            ?.emit(event, payload)
+             ?.getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+             ?.emit(event, payload)
      }
