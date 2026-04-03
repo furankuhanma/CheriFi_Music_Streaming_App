@@ -18,9 +18,7 @@ import {
   OfflineService,
 } from "../services/offline.service";
 
-const BASE_URL = (
-  process.env.EXPO_PUBLIC_API_URL ?? "https://api.clever-systems.com/api"
-).replace("/api", "");
+const BASE_URL = "https://api.clever-systems.com";
 
 type PlaylistOfflineStatus = {
   isMarkedOffline: boolean;

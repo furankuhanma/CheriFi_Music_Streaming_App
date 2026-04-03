@@ -63,6 +63,30 @@ type HomeFeedResponse = {
   data: HomeFeedSection[];
 };
 
+// ─── In-memory TTL cache ──────────────────────────────────────────────────────
+//
+// Keeps the last fetched feed in memory for CACHE_TTL_MS milliseconds.
+// Navigating away and back within the TTL window returns the cached result
+// instantly with no network request.
+//
+// The cache is intentionally module-level (not React state) so it survives
+// component unmounts. Call RecommendationsService.bustFeedCache() from the
+// pull-to-refresh handler to force a fresh fetch.
+
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+type FeedCache = {
+  sections: HomeFeedSection[];
+  fetchedAt: number; // Date.now() timestamp
+};
+
+let feedCache: FeedCache | null = null;
+
+function isCacheValid(): boolean {
+  if (!feedCache) return false;
+  return Date.now() - feedCache.fetchedAt < CACHE_TTL_MS;
+}
+
 // ─── Service ──────────────────────────────────────────────────────────────────
 
 export const RecommendationsService = {
@@ -99,9 +123,32 @@ export const RecommendationsService = {
     }
   },
 
-  // Dynamic home feed — returns 4–6 randomised sections per call
-  async homeFeed(): Promise<HomeFeedSection[]> {
+  // ── Home feed with TTL cache ────────────────────────────────────────────────
+  //
+  // forceRefresh = true  →  always hits the network and updates the cache.
+  //                          Pass this from pull-to-refresh handlers.
+  // forceRefresh = false →  returns cached data if still within TTL,
+  //                          otherwise fetches fresh data.
+
+  async homeFeed(forceRefresh = false): Promise<HomeFeedSection[]> {
+    if (!forceRefresh && isCacheValid()) {
+      return feedCache!.sections;
+    }
+
     const res = await api.get<HomeFeedResponse>("/recommendations/home-feed");
-    return res.data;
+
+    feedCache = {
+      sections: res.data,
+      fetchedAt: Date.now(),
+    };
+
+    return feedCache.sections;
+  },
+
+  // Call this to immediately invalidate the cache without fetching.
+  // Useful if the user logs out, switches accounts, or likes/unlikes tracks
+  // and you want the next mount to always get fresh data.
+  bustFeedCache(): void {
+    feedCache = null;
   },
 };

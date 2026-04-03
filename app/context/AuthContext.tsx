@@ -9,6 +9,7 @@ import React, {
 import { AuthService, AuthUser } from "../services/auth.service";
 import { AuthStore } from "../../stores/auth.store";
 import { ApiError } from "../services/api";
+import { RecommendationsService } from "../services/recommendations.service";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -131,6 +132,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setIsLoadingAuth(true);
     try {
       await AuthService.logout();
+      // Bust the feed cache so next login shows fresh content
+      RecommendationsService.bustFeedCache();
     } finally {
       setUser(null);
       setIsLoadingAuth(false);

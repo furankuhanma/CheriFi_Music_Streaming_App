@@ -330,7 +330,6 @@ function ArtistCard({
   artist: HomeFeedArtistSection["artists"][number];
   onPress: () => void;
 }) {
-  // Use imageUrl if available, fall back to first track's cover, then null
   const displayImage = artist.imageUrl ?? artist.fallbackCoverUrl ?? null;
 
   return (
@@ -460,6 +459,13 @@ function PublicPlaylistCard({
   );
 }
 
+// ─── Section header ───────────────────────────────────────────────────────────
+// Centralised so future "See all" buttons only need adding in one place.
+
+function SectionHeader({ title }: { title: string }) {
+  return <Text className="text-white text-xl font-bold mb-4">{title}</Text>;
+}
+
 // ─── Section renderers ────────────────────────────────────────────────────────
 
 function TrackLargeSection({
@@ -475,7 +481,7 @@ function TrackLargeSection({
 }) {
   return (
     <View className="mb-8">
-      <Text className="text-white text-xl font-bold mb-4">{section.title}</Text>
+      <SectionHeader title={section.title} />
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
@@ -508,7 +514,7 @@ function TrackSmallSection({
 }) {
   return (
     <View className="mb-8">
-      <Text className="text-white text-xl font-bold mb-3">{section.title}</Text>
+      <SectionHeader title={section.title} />
       {section.tracks.map((track) => (
         <TrackRow
           key={track.id}
@@ -526,7 +532,7 @@ function AlbumSection({ section }: { section: HomeFeedAlbumSection }) {
   const router = useRouter();
   return (
     <View className="mb-8">
-      <Text className="text-white text-xl font-bold mb-4">{section.title}</Text>
+      <SectionHeader title={section.title} />
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
@@ -559,7 +565,7 @@ function ArtistSection({ section }: { section: HomeFeedArtistSection }) {
   const router = useRouter();
   return (
     <View className="mb-8">
-      <Text className="text-white text-xl font-bold mb-4">{section.title}</Text>
+      <SectionHeader title={section.title} />
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
@@ -591,7 +597,7 @@ function PlaylistSection({ section }: { section: HomeFeedPlaylistSection }) {
   const router = useRouter();
   return (
     <View className="mb-8">
-      <Text className="text-white text-xl font-bold mb-4">{section.title}</Text>
+      <SectionHeader title={section.title} />
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
@@ -688,10 +694,12 @@ export default function HomeScreen() {
 
   // ── Loaders ──────────────────────────────────────────────────────────────────
 
-  const loadFeed = useCallback(async () => {
+  // forceRefresh = true busts the in-memory feed cache and always hits the network.
+  // Pass false on first mount so navigating back to Home is instant.
+  const loadFeed = useCallback(async (forceRefresh = false) => {
     setFeedError(false);
     try {
-      const sections = await RecommendationsService.homeFeed();
+      const sections = await RecommendationsService.homeFeed(forceRefresh);
       setFeedSections(sections);
       sections.forEach((section) => {
         if (section.type === "tracks") {
@@ -722,21 +730,26 @@ export default function HomeScreen() {
     }
   }, []);
 
-  const loadAll = useCallback(async () => {
-    setFeedLoading(true);
-    await Promise.all([loadFeed(), loadPlaylists()]);
-    setFeedLoading(false);
-  }, [loadFeed, loadPlaylists]);
+  // First mount: use cache if available (forceRefresh = false)
+  const loadAll = useCallback(
+    async (forceRefresh = false) => {
+      setFeedLoading(true);
+      await Promise.all([loadFeed(forceRefresh), loadPlaylists()]);
+      setFeedLoading(false);
+    },
+    [loadFeed, loadPlaylists],
+  );
 
   useEffect(() => {
-    loadAll();
+    loadAll(false);
   }, []);
 
-  // ── Pull-to-refresh ───────────────────────────────────────────────────────────
+  // ── Pull-to-refresh — always bypasses cache ───────────────────────────────────
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await Promise.all([loadFeed(), loadPlaylists()]);
+    // forceRefresh = true: bust the cache and get a brand-new feed layout
+    await Promise.all([loadFeed(true), loadPlaylists()]);
     setRefreshing(false);
   }, [loadFeed, loadPlaylists]);
 
@@ -839,7 +852,7 @@ export default function HomeScreen() {
             <Text className="text-[#FF4444] text-sm flex-1 ml-2">
               Couldn't load your feed.
             </Text>
-            <TouchableOpacity onPress={loadAll}>
+            <TouchableOpacity onPress={() => loadAll(true)}>
               <Text className="text-[#1DB954] text-sm font-semibold">
                 Retry
               </Text>

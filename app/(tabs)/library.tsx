@@ -1165,8 +1165,8 @@ export default function LibraryScreen() {
                     {selectedPlaylistFresh.title}
                   </Text>
                   <Text className="text-[#666] text-sm mt-1">
-                    {selectedPlaylistFresh.tracks.length}{" "}
-                    {selectedPlaylistFresh.tracks.length === 1
+                    {selectedPlaylistFresh.tracks?.length ?? 0}{" "}
+                    {(selectedPlaylistFresh.tracks?.length ?? 0) === 1
                       ? "song"
                       : "songs"}
                   </Text>
@@ -1221,7 +1221,7 @@ export default function LibraryScreen() {
                 </View>
 
                 {/* Track list */}
-                {selectedPlaylistFresh.tracks.length === 0 ? (
+                {(selectedPlaylistFresh.tracks?.length ?? 0) === 0 ? (
                   <View className="items-center py-12">
                     <Ionicons
                       name="musical-notes-outline"
@@ -1234,7 +1234,7 @@ export default function LibraryScreen() {
                   </View>
                 ) : (
                   <View className="bg-[#161616] rounded-2xl px-4 py-1 mb-8">
-                    {selectedPlaylistFresh.tracks.map((item, idx) => {
+                    {(selectedPlaylistFresh.tracks ?? []).map((item, idx) => {
                       const track = toPlayableTrack(item.track);
                       const disabledOffline =
                         !isOnline && !isTrackDownloaded(track.id);
@@ -1258,7 +1258,8 @@ export default function LibraryScreen() {
                                 : undefined
                             }
                           />
-                          {idx < selectedPlaylistFresh.tracks.length - 1 && (
+                          {idx <
+                            (selectedPlaylistFresh.tracks?.length ?? 0) - 1 && (
                             <View className="h-px bg-[#1E1E1E] ml-16" />
                           )}
                         </View>
