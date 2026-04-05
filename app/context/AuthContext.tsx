@@ -4,6 +4,7 @@ import React, {
   useState,
   useEffect,
   useCallback,
+  useMemo,
   ReactNode,
 } from "react";
 import { AuthService, AuthUser } from "../services/auth.service";
@@ -142,23 +143,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const clearAuthError = useCallback(() => setAuthError(null), []);
 
-  return (
-    <AuthContext.Provider
-      value={{
-        user,
-        isLoggedIn: user !== null,
-        isLoadingAuth,
-        authError,
-        login,
-        register,
-        loginWithGoogle,
-        logout,
-        clearAuthError,
-      }}
-    >
-      {children}
-    </AuthContext.Provider>
+  const value = useMemo<AuthContextType>(
+    () => ({
+      user,
+      isLoggedIn: user !== null,
+      isLoadingAuth,
+      authError,
+      login,
+      register,
+      loginWithGoogle,
+      logout,
+      clearAuthError,
+    }),
+    [
+      user,
+      isLoadingAuth,
+      authError,
+      login,
+      register,
+      loginWithGoogle,
+      logout,
+      clearAuthError,
+    ],
   );
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
 // ─── Hook ─────────────────────────────────────────────────────────────────────

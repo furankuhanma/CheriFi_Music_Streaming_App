@@ -60,7 +60,7 @@ export type YouTubeResult = {
   track: TrackDto | null;
 };
 
-// ─── NEW: Artist result type ──────────────────────────────────────────────────
+// ─── Artist result type ───────────────────────────────────────────────────────
 
 export type ArtistResult = {
   id: string;
@@ -72,6 +72,7 @@ export type ArtistResult = {
 export type SearchResult = {
   artists: ArtistResult[];
   results: YouTubeResult[];
+  youtubeAvailable: boolean;
 };
 
 function parseIsoDuration(iso: string): number {
@@ -103,7 +104,13 @@ async function searchYouTube(query: string, maxResults = 10): Promise<YouTubeSea
   });
 
   const searchRes = await fetch(`${YT_SEARCH_URL}?${searchParams}`);
-  if (!searchRes.ok) throw createError("YouTube search failed", 502);
+  if (!searchRes.ok) {
+    const body = await searchRes.text().catch(() => "");
+    throw createError(
+      `YouTube search failed (${searchRes.status}): ${body.slice(0, 120)}`,
+      502,
+    );
+  }
 
   const searchJson = (await searchRes.json()) as {
     items?: Array<{
@@ -154,7 +161,13 @@ async function searchYouTube(query: string, maxResults = 10): Promise<YouTubeSea
   });
 
   const videosRes = await fetch(`${YT_VIDEOS_URL}?${videosParams}`);
-  if (!videosRes.ok) throw createError("YouTube details lookup failed", 502);
+  if (!videosRes.ok) {
+    const body = await videosRes.text().catch(() => "");
+    throw createError(
+      `YouTube details lookup failed (${videosRes.status}): ${body.slice(0, 120)}`,
+      502,
+    );
+  }
 
   const videosJson = (await videosRes.json()) as {
     items?: Array<{ id?: string; contentDetails?: { duration?: string } }>;
@@ -251,7 +264,7 @@ function extractGenre(tags: string[], description: string): string | null {
   return found ? found.charAt(0).toUpperCase() + found.slice(1) : null;
 }
 
-// ─── NEW: Search artists in DB ────────────────────────────────────────────────
+// ─── Search artists in DB ─────────────────────────────────────────────────────
 
 async function searchArtists(query: string): Promise<ArtistResult[]> {
   const artists = await prisma.artist.findMany({
@@ -276,67 +289,115 @@ async function searchArtists(query: string): Promise<ArtistResult[]> {
   }));
 }
 
+// ─── Search tracks in DB by keyword ──────────────────────────────────────────
+
+async function searchDatabase(query: string, userId?: string): Promise<YouTubeResult[]> {
+  const tracks = await prisma.track.findMany({
+    where: {
+      OR: [
+        { title: { contains: query, mode: "insensitive" } },
+        { artist: { name: { contains: query, mode: "insensitive" } } },
+        { album: { title: { contains: query, mode: "insensitive" } } },
+        { genre: { contains: query, mode: "insensitive" } },
+      ],
+    },
+    include: trackInclude,
+    orderBy: { playCount: "desc" },
+    take: 20,
+  });
+
+  return tracks.map((track) => ({
+    videoId: "",
+    title: track.title,
+    channelTitle: track.artist.name,
+    thumbnailUrl: track.coverUrl ?? track.album?.coverUrl ?? null,
+    duration: track.duration,
+    inDatabase: true,
+    track: formatTrack(track, userId),
+  }));
+}
+
 // ─── Search service ───────────────────────────────────────────────────────────
 
 export const SearchService = {
   async search(query: string, userId?: string): Promise<SearchResult> {
-    // Run artist DB search and YouTube search in parallel
-    const [artists, youtubeItems] = await Promise.all([
+    // ── 1. Always run DB searches first — these never fail ──────────────────
+    const [artists, dbResults] = await Promise.all([
       searchArtists(query),
-      searchYouTube(query, 10),
+      searchDatabase(query, userId),
     ]);
 
-    if (youtubeItems.length === 0) return { artists, results: [] };
+    // ── 2. Attempt YouTube as optional enrichment ───────────────────────────
+    let youtubeAvailable = true;
+    let youtubeItems: YouTubeSearchItem[] = [];
 
-    const videoIds = youtubeItems.map((item) => item.videoId);
-
-    // FIX: resolve musicDir the same way requestTrack does so the contains
-    // check matches the exact path format stored in the DB
-    const musicDir = path.resolve(
-      process.env.MUSIC_DIR ?? "/home/jarvis/vibestream/audio",
-    );
-
-    const existingTracks = await prisma.track.findMany({
-      where: {
-        OR: videoIds.map((videoId) => ({
-          audioUrl: path.join(musicDir, `${videoId}.mp3`),
-        })),
-      },
-      include: trackInclude,
-    });
-
-    const trackByVideoId = new Map<string, TrackDto>();
-    for (const track of existingTracks) {
-      // Extract videoId from the stored absolute path  e.g. /home/jarvis/.../yzTuBuRdAyA.mp3
-      const videoId = path.basename(track.audioUrl, path.extname(track.audioUrl));
-      trackByVideoId.set(videoId, formatTrack(track, userId));
+    try {
+      youtubeItems = await searchYouTube(query, 10);
+    } catch (err) {
+      console.warn("[Search] YouTube unavailable, falling back to DB only:", err);
+      youtubeAvailable = false;
     }
 
-    const results: YouTubeResult[] = youtubeItems.map((item) => {
-      const existing = trackByVideoId.get(item.videoId) ?? null;
-      return {
-        videoId: item.videoId,
-        title: existing?.title ?? item.title,
-        channelTitle: existing?.artist.name ?? item.channelTitle,
-        thumbnailUrl: existing?.coverUrl ?? item.thumbnailUrl,
-        duration: existing?.duration ?? item.duration,
-        inDatabase: existing !== null,
-        track: existing,
-      };
-    });
+    // ── 3. If YouTube worked, enrich with DB track data and merge ───────────
+    if (youtubeItems.length > 0) {
+      const musicDir = path.resolve(
+        process.env.MUSIC_DIR ?? "/home/jarvis/vibestream/audio",
+      );
 
-    return { artists, results };
+      const videoIds = youtubeItems.map((item) => item.videoId);
+
+      const existingTracks = await prisma.track.findMany({
+        where: {
+          OR: videoIds.map((videoId) => ({
+            audioUrl: path.join(musicDir, `${videoId}.mp3`),
+          })),
+        },
+        include: trackInclude,
+      });
+
+      const trackByVideoId = new Map<string, TrackDto>();
+      for (const track of existingTracks) {
+        const videoId = path.basename(track.audioUrl, path.extname(track.audioUrl));
+        trackByVideoId.set(videoId, formatTrack(track, userId));
+      }
+
+      // Build YouTube results, merging with DB data where available
+      const youtubeResults: YouTubeResult[] = youtubeItems.map((item) => {
+        const existing = trackByVideoId.get(item.videoId) ?? null;
+        return {
+          videoId: item.videoId,
+          title: existing?.title ?? item.title,
+          channelTitle: existing?.artist.name ?? item.channelTitle,
+          thumbnailUrl: existing?.coverUrl ?? item.thumbnailUrl,
+          duration: existing?.duration ?? item.duration,
+          inDatabase: existing !== null,
+          track: existing,
+        };
+      });
+
+      // DB-first: prepend DB-only results that have no matching YouTube videoId
+      const youtubeVideoIds = new Set(youtubeResults.map((r) => r.videoId));
+      const dbOnlyResults = dbResults.filter(
+        (r) => !youtubeVideoIds.has(r.videoId),
+      );
+
+      return {
+        artists,
+        results: [...dbOnlyResults, ...youtubeResults],
+        youtubeAvailable,
+      };
+    }
+
+    // ── 4. YouTube unavailable or empty — return DB results only ───────────
+    return { artists, results: dbResults, youtubeAvailable };
   },
 
   async requestTrack(videoId: string, userId?: string): Promise<TrackDto> {
-    // FIX: resolve musicDir and mp3Path FIRST so we can use the exact path
-    // for the duplicate check — matching how the path is stored in the DB
     const musicDir = path.resolve(
       process.env.MUSIC_DIR ?? "/home/jarvis/vibestream/audio",
     );
     const mp3Path = path.resolve(path.join(musicDir, `${videoId}.mp3`));
 
-    // FIX: check by exact audioUrl path instead of a loose `contains` check
     const existing = await prisma.track.findFirst({
       where: { audioUrl: mp3Path },
       include: trackInclude,

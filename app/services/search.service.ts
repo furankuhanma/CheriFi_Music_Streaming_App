@@ -21,6 +21,7 @@ export type ArtistResult = {
 export type SearchResponse = {
   artists: ArtistResult[];
   results: YouTubeSearchResult[];
+  youtubeAvailable: boolean;
 };
 
 type ApiSearchResponse = {
@@ -34,12 +35,48 @@ type RequestResponse = {
   data: Track;
 };
 
+type CacheEntry<T> = {
+  value: T;
+  at: number;
+};
+
+const SEARCH_CACHE_TTL_MS = 20 * 1000;
+const searchCache = new Map<string, CacheEntry<SearchResponse>>();
+const searchInFlight = new Map<string, Promise<SearchResponse>>();
+
+function getCachedSearch(key: string): SearchResponse | null {
+  const hit = searchCache.get(key);
+  if (!hit) return null;
+  if (Date.now() - hit.at > SEARCH_CACHE_TTL_MS) {
+    searchCache.delete(key);
+    return null;
+  }
+  return hit.value;
+}
+
 export const SearchService = {
   async searchYouTube(query: string): Promise<SearchResponse> {
-    const res = await api.get<ApiSearchResponse>(
-      `/search/youtube?q=${encodeURIComponent(query)}`,
-    );
-    return res.data;
+    const normalized = query.trim().toLowerCase();
+    if (!normalized) return { artists: [], results: [], youtubeAvailable: true };
+
+    const cached = getCachedSearch(normalized);
+    if (cached) return cached;
+
+    const pending = searchInFlight.get(normalized);
+    if (pending) return pending;
+
+    const task = api
+      .get<ApiSearchResponse>(`/search/youtube?q=${encodeURIComponent(query)}`)
+      .then((res) => {
+        searchCache.set(normalized, { value: res.data, at: Date.now() });
+        return res.data;
+      })
+      .finally(() => {
+        searchInFlight.delete(normalized);
+      });
+
+    searchInFlight.set(normalized, task);
+    return task;
   },
 
   async requestTrack(videoId: string): Promise<Track> {

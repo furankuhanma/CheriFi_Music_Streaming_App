@@ -1,6 +1,6 @@
 // CheriFi/app/(tabs)/library.tsx
 
-import { ReactNode, useCallback, useMemo, useState } from "react";
+import { memo, ReactNode, useCallback, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -17,16 +17,19 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "expo-router";
-import { usePlayer } from "../context/PlayerContext";
+import { usePlayerControls } from "../context/PlayerContext";
 import { useOffline } from "../context/OfflineContext";
 import { useDownload } from "../context/DownloadContext";
+import { useLocalTracks } from "../context/LocalTracksContext";
 import { PlaylistsService, Playlist } from "../services/playlists.api";
 import { Track, TracksService } from "../services/tracks.service";
+import { LocalTrack } from "../services/localTracks.service";
 import PlaylistCover from "../components/PlaylistCover";
 import TrackActionsSheet from "../components/TrackActionsSheet";
 import AddToPlaylistModal from "../components/AddToPlaylistModal";
 import { CircularDownloadProgress } from "../components/CircularDownloadProgress";
 import { OfflineDownloadItem } from "../services/offline.service";
+import { useBottomOverlaySpacing } from "../hooks/useBottomOverlaySpacing";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -48,7 +51,7 @@ function toPlayableTrack(track: any): Track {
 
 // ─── Section header ───────────────────────────────────────────────────────────
 
-function SectionHeader({
+const SectionHeader = memo(function SectionHeader({
   title,
   icon,
   right,
@@ -86,11 +89,11 @@ function SectionHeader({
       {right}
     </View>
   );
-}
+});
 
 // ─── Error state ──────────────────────────────────────────────────────────────
 
-function SectionError({
+const SectionError = memo(function SectionError({
   message,
   onRetry,
 }: {
@@ -106,7 +109,7 @@ function SectionError({
       </TouchableOpacity>
     </View>
   );
-}
+});
 
 // ─── Skeleton rows ────────────────────────────────────────────────────────────
 
@@ -128,7 +131,7 @@ function LoadingRows() {
 
 // ─── Track row (library style) ────────────────────────────────────────────────
 
-function TrackRow({
+const TrackRow = memo(function TrackRow({
   track,
   isActive,
   subtitle,
@@ -206,11 +209,55 @@ function TrackRow({
       {right}
     </TouchableOpacity>
   );
-}
+});
+
+// ─── Local track row ──────────────────────────────────────────────────────────
+// Reuses TrackRow but appends a remove (trash) button on the right.
+
+const LocalTrackRow = memo(function LocalTrackRow({
+  track,
+  isActive,
+  onPress,
+  onRemove,
+}: {
+  track: LocalTrack;
+  isActive: boolean;
+  onPress: () => void;
+  onRemove: () => void;
+}) {
+  const handleRemove = () => {
+    Alert.alert(
+      "Remove local file",
+      `Remove "${track.title}" from CheriFi? The original file on your device won't be deleted.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        { text: "Remove", style: "destructive", onPress: onRemove },
+      ],
+    );
+  };
+
+  return (
+    <TrackRow
+      track={track}
+      isActive={isActive}
+      subtitle="Local file · Unknown Artist"
+      onPress={onPress}
+      right={
+        <TouchableOpacity
+          onPress={handleRemove}
+          hitSlop={8}
+          className="p-2 ml-1"
+        >
+          <Ionicons name="trash-outline" size={18} color="#555" />
+        </TouchableOpacity>
+      }
+    />
+  );
+});
 
 // ─── Offline download row (click to play, minimal chrome) ─────────────────────
 
-function DownloadRow({
+const DownloadRow = memo(function DownloadRow({
   item,
   isActive,
   onPlay,
@@ -231,7 +278,11 @@ function DownloadRow({
   const progressValue = progress?.progress ?? item.progress;
 
   const handleTogglePause = () => {
-    isPaused ? resumeDownload(item.trackId) : pauseDownload(item.trackId);
+    if (isPaused) {
+      resumeDownload(item.trackId);
+    } else {
+      pauseDownload(item.trackId);
+    }
   };
 
   const handleCancel = () => {
@@ -253,6 +304,11 @@ function DownloadRow({
       onPress={() => isCompleted && onPlay(item.track)}
       activeOpacity={isCompleted ? 0.7 : 1}
       className="flex-row items-center py-2.5"
+      style={{
+        position: "relative",
+        zIndex: menuOpen ? 100 : 1,
+        elevation: menuOpen ? 100 : 1,
+      }}
     >
       {/* Cover + progress overlay */}
       <View style={{ position: "relative", marginRight: 12 }}>
@@ -355,7 +411,13 @@ function DownloadRow({
       </View>
 
       {/* Three-dot menu */}
-      <View style={{ position: "relative" }}>
+      <View
+        style={{
+          position: "relative",
+          zIndex: menuOpen ? 1000 : 1,
+          elevation: menuOpen ? 1000 : 1,
+        }}
+      >
         <TouchableOpacity
           onPress={() => setMenuOpen((p) => !p)}
           hitSlop={8}
@@ -373,11 +435,11 @@ function DownloadRow({
               backgroundColor: "#252525",
               borderRadius: 10,
               minWidth: 160,
-              zIndex: 20,
+              zIndex: 2000,
               shadowColor: "#000",
               shadowOpacity: 0.4,
               shadowRadius: 8,
-              elevation: 8,
+              elevation: 2000,
             }}
           >
             {(isDownloading || isPaused) && (
@@ -418,11 +480,11 @@ function DownloadRow({
       </View>
     </TouchableOpacity>
   );
-}
+});
 
 // ─── Playlist row ─────────────────────────────────────────────────────────────
 
-function PlaylistRow({
+const PlaylistRow = memo(function PlaylistRow({
   playlist,
   onPress,
   offlineStatus,
@@ -501,7 +563,7 @@ function PlaylistRow({
       )}
     </TouchableOpacity>
   );
-}
+});
 
 // ─── Edit modal ───────────────────────────────────────────────────────────────
 
@@ -514,7 +576,8 @@ type PlaylistEditState = {
 // ─── Main screen ──────────────────────────────────────────────────────────────
 
 export default function LibraryScreen() {
-  const { playTrack, currentTrack, addToQueue, addToQueueNext } = usePlayer();
+  const { playTrack, currentTrack, addToQueue, addToQueueNext } =
+    usePlayerControls();
   const {
     downloadedTracks,
     downloadsMap,
@@ -526,12 +589,14 @@ export default function LibraryScreen() {
     getPlaylistOfflineStatus,
   } = useOffline();
   const { getActiveDownloadsCount } = useDownload();
+  const { localTracks, importTracks, removeLocalTrack } = useLocalTracks();
 
   const [liked, setLiked] = useState<Track[]>([]);
   const [recent, setRecent] = useState<Track[]>([]);
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
   const [showAllRecent, setShowAllRecent] = useState(false);
   const [showAllLiked, setShowAllLiked] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
 
   const [selectedTrack, setSelectedTrack] = useState<Track | null>(null);
   const [sheetVisible, setSheetVisible] = useState(false);
@@ -556,10 +621,11 @@ export default function LibraryScreen() {
   const [searchQuery, setSearchQuery] = useState("");
   const trimmedQuery = searchQuery.trim().toLowerCase();
   const isSearching = trimmedQuery.length > 0;
+  const bottomContentPadding = useBottomOverlaySpacing(24);
 
   const searchedTracks = useMemo(() => {
     if (!isSearching) return [];
-    const all = [...downloadedTracks, ...liked, ...recent];
+    const all = [...localTracks, ...downloadedTracks, ...liked, ...recent];
     const seen = new Set<string>();
     return all.filter((t) => {
       if (seen.has(t.id)) return false;
@@ -570,7 +636,7 @@ export default function LibraryScreen() {
         (t.album?.title ?? "").toLowerCase().includes(trimmedQuery)
       );
     });
-  }, [isSearching, trimmedQuery, downloadedTracks, liked, recent]);
+  }, [isSearching, trimmedQuery, localTracks, downloadedTracks, liked, recent]);
 
   const searchedPlaylists = useMemo(() => {
     if (!isSearching) return [];
@@ -718,6 +784,23 @@ export default function LibraryScreen() {
     [isOnline, isTrackDownloaded, playTrack],
   );
 
+  // Local tracks are always playable (file:// URI) — bypass the online check.
+  const handleLocalTrackPress = useCallback(
+    (track: Track) => {
+      playTrack(track);
+    },
+    [playTrack],
+  );
+
+  const handleImport = useCallback(async () => {
+    setIsImporting(true);
+    try {
+      await importTracks();
+    } finally {
+      setIsImporting(false);
+    }
+  }, [importTracks]);
+
   const activeDownloads = getActiveDownloadsCount();
   const downloadItems = Object.values(downloadsMap).sort((a, b) => {
     if (a.status === "downloading" || a.status === "paused") return -1;
@@ -725,12 +808,31 @@ export default function LibraryScreen() {
     return +new Date(b.updatedAt) - +new Date(a.updatedAt);
   });
 
+  const playlistOfflineStatusById = useMemo(() => {
+    const next = new Map<string, ReturnType<typeof getPlaylistOfflineStatus>>();
+    playlists.forEach((playlist) => {
+      next.set(playlist.id, getPlaylistOfflineStatus(playlist));
+    });
+    return next;
+  }, [playlists, getPlaylistOfflineStatus]);
+
+  const visibleLiked = useMemo(
+    () => (showAllLiked ? liked : liked.slice(0, 8)),
+    [showAllLiked, liked],
+  );
+
+  const visibleRecent = useMemo(
+    () => (showAllRecent ? recent : recent.slice(0, 20)),
+    [showAllRecent, recent],
+  );
+
   // ── Render ──────────────────────────────────────────────────────────────────
 
   return (
     <SafeAreaView className="flex-1 bg-[#121212]">
       <ScrollView
         className="px-4 pt-6"
+        contentContainerStyle={{ paddingBottom: bottomContentPadding }}
         showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl
@@ -743,14 +845,36 @@ export default function LibraryScreen() {
         {/* ── Header ── */}
         <View className="flex-row items-center justify-between mb-5">
           <Text className="text-white text-2xl font-bold">Your Library</Text>
-          {!isOnline && (
-            <View className="flex-row items-center bg-[#F4C95D18] border border-[#F4C95D30] rounded-full px-3 py-1">
-              <View className="w-1.5 h-1.5 rounded-full bg-[#F4C95D] mr-1.5" />
-              <Text className="text-[#F4C95D] text-xs font-semibold">
-                Offline
+          <View className="flex-row items-center gap-3">
+            {/* Import local music button */}
+            <TouchableOpacity
+              onPress={handleImport}
+              disabled={isImporting}
+              className="flex-row items-center gap-1.5 bg-[#1A1A1A] border border-[#252525] rounded-full px-3 py-1.5"
+            >
+              {isImporting ? (
+                <ActivityIndicator size="small" color="#1DB954" />
+              ) : (
+                <Ionicons
+                  name="folder-open-outline"
+                  size={15}
+                  color="#1DB954"
+                />
+              )}
+              <Text className="text-[#1DB954] text-xs font-semibold">
+                {isImporting ? "Importing…" : "Import"}
               </Text>
-            </View>
-          )}
+            </TouchableOpacity>
+
+            {!isOnline && (
+              <View className="flex-row items-center bg-[#F4C95D18] border border-[#F4C95D30] rounded-full px-3 py-1">
+                <View className="w-1.5 h-1.5 rounded-full bg-[#F4C95D] mr-1.5" />
+                <Text className="text-[#F4C95D] text-xs font-semibold">
+                  Offline
+                </Text>
+              </View>
+            )}
+          </View>
         </View>
 
         {/* ── Search ── */}
@@ -795,7 +919,7 @@ export default function LibraryScreen() {
                   <Ionicons name="search-outline" size={28} color="#333" />
                 </View>
                 <Text className="text-[#444] text-sm">
-                  No results for "{searchQuery.trim()}"
+                  No results for &quot;{searchQuery.trim()}&quot;
                 </Text>
               </View>
             ) : (
@@ -813,6 +937,18 @@ export default function LibraryScreen() {
                       }
                     />
                     {searchedTracks.map((track) => {
+                      const isLocal = track.id.startsWith("local:");
+                      if (isLocal) {
+                        return (
+                          <LocalTrackRow
+                            key={track.id}
+                            track={track as LocalTrack}
+                            isActive={currentTrack?.id === track.id}
+                            onPress={() => handleLocalTrackPress(track)}
+                            onRemove={() => removeLocalTrack(track.id)}
+                          />
+                        );
+                      }
                       const downloaded = isTrackDownloaded(track.id);
                       const disabledOffline = !isOnline && !downloaded;
                       return (
@@ -872,12 +1008,17 @@ export default function LibraryScreen() {
                         key={playlist.id}
                         playlist={playlist}
                         onPress={() => setSelectedPlaylist(playlist)}
-                        offlineStatus={getPlaylistOfflineStatus(playlist)}
+                        offlineStatus={
+                          playlistOfflineStatusById.get(playlist.id) ??
+                          getPlaylistOfflineStatus(playlist)
+                        }
                         onToggleOffline={async () => {
                           const s = getPlaylistOfflineStatus(playlist);
-                          s.isMarkedOffline
-                            ? await unmarkPlaylistOffline(playlist.id)
-                            : await markPlaylistOffline(playlist);
+                          if (s.isMarkedOffline) {
+                            await unmarkPlaylistOffline(playlist.id);
+                          } else {
+                            await markPlaylistOffline(playlist);
+                          }
                         }}
                         isOnline={isOnline}
                       />
@@ -894,6 +1035,39 @@ export default function LibraryScreen() {
         ══════════════════════════════════════════════════════════════════ */}
         {!loading && !error && !isSearching && (
           <>
+            {/* ── Local Files ── */}
+            {localTracks.length > 0 && (
+              <View className="mb-8">
+                <SectionHeader
+                  title="Local Files"
+                  icon="folder-open"
+                  accent
+                  right={
+                    <View className="bg-[#1E1E1E] rounded-full px-2.5 py-0.5">
+                      <Text className="text-[#666] text-xs">
+                        {localTracks.length}
+                      </Text>
+                    </View>
+                  }
+                />
+                <View className="bg-[#161616] rounded-2xl px-4 py-1">
+                  {localTracks.map((track, idx) => (
+                    <View key={track.id}>
+                      <LocalTrackRow
+                        track={track}
+                        isActive={currentTrack?.id === track.id}
+                        onPress={() => handleLocalTrackPress(track)}
+                        onRemove={() => removeLocalTrack(track.id)}
+                      />
+                      {idx < localTracks.length - 1 && (
+                        <View className="h-px bg-[#1E1E1E] ml-16" />
+                      )}
+                    </View>
+                  ))}
+                </View>
+              </View>
+            )}
+
             {/* ── Offline Downloads ── */}
             {downloadItems.length > 0 && (
               <View className="mb-8">
@@ -919,9 +1093,15 @@ export default function LibraryScreen() {
                     </View>
                   }
                 />
-                <View className="bg-[#161616] rounded-2xl px-4 py-1">
+                <View
+                  className="bg-[#161616] rounded-2xl px-4 py-1"
+                  style={{ overflow: "visible" }}
+                >
                   {downloadItems.map((item, idx) => (
-                    <View key={item.trackId}>
+                    <View
+                      key={item.trackId}
+                      style={{ position: "relative", overflow: "visible" }}
+                    >
                       <DownloadRow
                         item={item}
                         isActive={currentTrack?.id === item.trackId}
@@ -969,12 +1149,17 @@ export default function LibraryScreen() {
                       <PlaylistRow
                         playlist={playlist}
                         onPress={() => setSelectedPlaylist(playlist)}
-                        offlineStatus={getPlaylistOfflineStatus(playlist)}
+                        offlineStatus={
+                          playlistOfflineStatusById.get(playlist.id) ??
+                          getPlaylistOfflineStatus(playlist)
+                        }
                         onToggleOffline={async () => {
                           const s = getPlaylistOfflineStatus(playlist);
-                          s.isMarkedOffline
-                            ? await unmarkPlaylistOffline(playlist.id)
-                            : await markPlaylistOffline(playlist);
+                          if (s.isMarkedOffline) {
+                            await unmarkPlaylistOffline(playlist.id);
+                          } else {
+                            await markPlaylistOffline(playlist);
+                          }
                         }}
                         isOnline={isOnline}
                       />
@@ -1003,9 +1188,7 @@ export default function LibraryScreen() {
                   }
                 />
                 <View className="bg-[#161616] rounded-2xl px-4 py-1">
-                  {(showAllLiked ? liked : liked.slice(0, 8)).map(
-                    (track, idx) => {
-                      const sl = showAllLiked ? liked : liked.slice(0, 8);
+                  {visibleLiked.map((track, idx) => {
                       const disabledOffline =
                         !isOnline && !isTrackDownloaded(track.id);
                       return (
@@ -1026,13 +1209,12 @@ export default function LibraryScreen() {
                                 : undefined
                             }
                           />
-                          {idx < sl.length - 1 && (
+                          {idx < visibleLiked.length - 1 && (
                             <View className="h-px bg-[#1E1E1E] ml-16" />
                           )}
                         </View>
                       );
-                    },
-                  )}
+                    })}
                 </View>
                 {liked.length > 8 && (
                   <TouchableOpacity
@@ -1063,9 +1245,7 @@ export default function LibraryScreen() {
                   }
                 />
                 <View className="bg-[#161616] rounded-2xl px-4 py-1">
-                  {(showAllRecent ? recent : recent.slice(0, 20)).map(
-                    (track, idx) => {
-                      const sl = showAllRecent ? recent : recent.slice(0, 20);
+                  {visibleRecent.map((track, idx) => {
                       const disabledOffline =
                         !isOnline && !isTrackDownloaded(track.id);
                       return (
@@ -1086,13 +1266,12 @@ export default function LibraryScreen() {
                                 : undefined
                             }
                           />
-                          {idx < sl.length - 1 && (
+                          {idx < visibleRecent.length - 1 && (
                             <View className="h-px bg-[#1E1E1E] ml-16" />
                           )}
                         </View>
                       );
-                    },
-                  )}
+                    })}
                 </View>
                 {recent.length > 20 && (
                   <TouchableOpacity
@@ -1111,7 +1290,6 @@ export default function LibraryScreen() {
           </>
         )}
 
-        <View style={{ height: 100 }} />
       </ScrollView>
 
       {/* ══════════════════════════════════════════════════════════════════
@@ -1177,11 +1355,11 @@ export default function LibraryScreen() {
                     return (
                       <TouchableOpacity
                         onPress={async () => {
-                          s.isMarkedOffline
-                            ? await unmarkPlaylistOffline(
-                                selectedPlaylistFresh.id,
-                              )
-                            : await markPlaylistOffline(selectedPlaylistFresh);
+                          if (s.isMarkedOffline) {
+                            await unmarkPlaylistOffline(selectedPlaylistFresh.id);
+                          } else {
+                            await markPlaylistOffline(selectedPlaylistFresh);
+                          }
                         }}
                         className="flex-row items-center mt-4 rounded-full px-4 py-2"
                         style={{

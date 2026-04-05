@@ -16,6 +16,7 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { PlaylistsService, Playlist } from "../services/playlists.api";
 import PlaylistCover from "./PlaylistCover";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 type Props = {
   trackId: string | null;
@@ -30,6 +31,7 @@ export default function AddToPlaylistModal({
   visible,
   onClose,
 }: Props) {
+  const insets = useSafeAreaInsets();
   const translateY = useRef(new Animated.Value(600)).current;
   const backdropOpacity = useRef(new Animated.Value(0)).current;
   const [mounted, setMounted] = useState(false);
@@ -161,7 +163,7 @@ export default function AddToPlaylistModal({
             p.id === playlist.id
               ? {
                   ...p,
-                  tracks: p.tracks.filter((t) => t.trackId !== trackId),
+                  tracks: (p.tracks ?? []).filter((t) => t.trackId !== trackId),
                 }
               : p,
           ),
@@ -175,11 +177,11 @@ export default function AddToPlaylistModal({
               ? {
                   ...p,
                   tracks: [
-                    ...p.tracks,
+                    ...(p.tracks ?? []),
                     {
                       playlistId: playlist.id,
                       trackId,
-                      position: p.tracks.length,
+                      position: (p.tracks ?? []).length,
                       addedAt: new Date().toISOString(),
                       track: {} as any,
                     },
@@ -267,9 +269,9 @@ export default function AddToPlaylistModal({
             backgroundColor: "#1A1A1A",
             borderTopLeftRadius: 20,
             borderTopRightRadius: 20,
-            paddingBottom: 36,
+            paddingBottom: insets.bottom + 16,
             transform: [{ translateY }],
-            maxHeight: "70%",
+            maxHeight: "78%",
           }}
         >
           {/* Drag handle */}
@@ -538,7 +540,7 @@ export default function AddToPlaylistModal({
             <Animated.View
               style={{
                 position: "absolute",
-                bottom: 44,
+                bottom: insets.bottom + 16,
                 left: 20,
                 right: 20,
                 backgroundColor:

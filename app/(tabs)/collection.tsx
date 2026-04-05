@@ -6,7 +6,7 @@
 //                coverUrl?: string
 //                subtitle?: string   (artist name for albums, owner for playlists)
 
-import { useEffect, useState, useCallback } from "react";
+import { memo, useEffect, useState, useCallback, useMemo } from "react";
 import {
   View,
   Text,
@@ -20,16 +20,17 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import { usePlayer } from "../context/PlayerContext";
+import { usePlayerControls } from "../context/PlayerContext";
 import { TracksService, Track } from "../services/tracks.service";
 import { PlaylistsService } from "../services/playlists.api";
+import { useBottomOverlaySpacing } from "../hooks/useBottomOverlaySpacing";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const COVER_SIZE = SCREEN_WIDTH * 0.52;
 
 // ─── Track row ────────────────────────────────────────────────────────────────
 
-function TrackRow({
+const TrackRow = memo(function TrackRow({
   track,
   index,
   isActive,
@@ -115,7 +116,7 @@ function TrackRow({
       </Text>
     </TouchableOpacity>
   );
-}
+});
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
@@ -131,12 +132,13 @@ export default function CollectionScreen() {
 
   const { type, id, title, coverUrl, subtitle } = params;
 
-  const { loadAndPlay, currentTrack } = usePlayer();
+  const { loadAndPlay, currentTrack } = usePlayerControls();
 
   const [tracks, setTracks] = useState<Track[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState(false);
+  const bottomContentPadding = useBottomOverlaySpacing(24);
 
   // ── Load tracks ─────────────────────────────────────────────────────────────
 
@@ -214,7 +216,10 @@ export default function CollectionScreen() {
 
   // ── Total duration ───────────────────────────────────────────────────────────
 
-  const totalSeconds = tracks.reduce((sum, t) => sum + t.duration, 0);
+  const totalSeconds = useMemo(
+    () => tracks.reduce((sum, t) => sum + t.duration, 0),
+    [tracks],
+  );
   const totalMins = Math.floor(totalSeconds / 60);
   const totalHrs = Math.floor(totalMins / 60);
   const durationLabel =
@@ -231,7 +236,7 @@ export default function CollectionScreen() {
     <SafeAreaView style={{ flex: 1, backgroundColor: "#121212" }}>
       <ScrollView
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: 120 }}
+        contentContainerStyle={{ paddingBottom: bottomContentPadding }}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -409,7 +414,7 @@ export default function CollectionScreen() {
             <Text
               style={{ color: "#FF4444", fontSize: 13, flex: 1, marginLeft: 8 }}
             >
-              Couldn't load tracks.
+              Couldn&apos;t load tracks.
             </Text>
             <TouchableOpacity onPress={loadTracks}>
               <Text

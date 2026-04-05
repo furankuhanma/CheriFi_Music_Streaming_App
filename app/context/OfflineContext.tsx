@@ -309,26 +309,41 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  const value = useMemo<OfflineContextType>(
+    () => ({
+      downloadsMap,
+      downloadedTracks,
+      offlinePlaylists,
+      isHydrated,
+      isOnline,
+      getDownloadItem,
+      isTrackDownloaded,
+      downloadTrack,
+      removeTrackDownload,
+      toggleTrackDownload,
+      markPlaylistOffline,
+      unmarkPlaylistOffline,
+      getPlaylistOfflineStatus,
+    }),
+    [
+      downloadsMap,
+      downloadedTracks,
+      offlinePlaylists,
+      isHydrated,
+      isOnline,
+      getDownloadItem,
+      isTrackDownloaded,
+      downloadTrack,
+      removeTrackDownload,
+      toggleTrackDownload,
+      markPlaylistOffline,
+      unmarkPlaylistOffline,
+      getPlaylistOfflineStatus,
+    ],
+  );
+
   return (
-    <OfflineContext.Provider
-      value={{
-        downloadsMap,
-        downloadedTracks,
-        offlinePlaylists,
-        isHydrated,
-        isOnline,
-        getDownloadItem,
-        isTrackDownloaded,
-        downloadTrack,
-        removeTrackDownload,
-        toggleTrackDownload,
-        markPlaylistOffline,
-        unmarkPlaylistOffline,
-        getPlaylistOfflineStatus,
-      }}
-    >
-      {children}
-    </OfflineContext.Provider>
+    <OfflineContext.Provider value={value}>{children}</OfflineContext.Provider>
   );
 }
 

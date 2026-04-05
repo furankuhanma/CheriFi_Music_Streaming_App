@@ -1,12 +1,11 @@
 // CheriFi/app/(tabs)/search.tsx
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
   FlatList,
   Image,
-  ScrollView,
   Text,
   TextInput,
   TouchableOpacity,
@@ -16,7 +15,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useRouter } from "expo-router";
-import { usePlayer } from "../context/PlayerContext";
+import { usePlayerControls } from "../context/PlayerContext";
 import { TracksService, Track } from "../services/tracks.service";
 import {
   SearchService,
@@ -25,6 +24,7 @@ import {
 } from "@/app/services/search.service";
 import AddToPlaylistModal from "../components/AddToPlaylistModal";
 import TrackActionsSheet from "../components/TrackActionsSheet";
+import { useBottomOverlaySpacing } from "../hooks/useBottomOverlaySpacing";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -72,9 +72,36 @@ function formatDuration(seconds: number): string {
   return `${m}:${s}`;
 }
 
+// ─── YouTube Unavailable Banner ───────────────────────────────────────────────
+
+function YouTubeUnavailableBanner() {
+  return (
+    <View
+      style={{
+        flexDirection: "row",
+        alignItems: "center",
+        backgroundColor: "#1A1A1A",
+        borderRadius: 8,
+        marginHorizontal: 16,
+        marginBottom: 10,
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+        gap: 8,
+        borderLeftWidth: 3,
+        borderLeftColor: "#F59E0B",
+      }}
+    >
+      <Ionicons name="cloud-offline-outline" size={15} color="#F59E0B" />
+      <Text style={{ color: "#A3A3A3", fontSize: 12, flex: 1 }}>
+        YouTube search unavailable — showing your library results only
+      </Text>
+    </View>
+  );
+}
+
 // ─── Artist Card (circular, like home page) ───────────────────────────────────
 
-function ArtistCard({
+const ArtistCard = memo(function ArtistCard({
   artist,
   onPress,
 }: {
@@ -137,7 +164,7 @@ function ArtistCard({
       </Text>
     </TouchableOpacity>
   );
-}
+});
 
 // ─── Artist Results Section ───────────────────────────────────────────────────
 
@@ -163,19 +190,20 @@ function ArtistSection({
       >
         Artists
       </Text>
-      <ScrollView
+      <FlatList
+        data={artists}
         horizontal
+        keyExtractor={(item) => item.id}
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={{ paddingHorizontal: 16 }}
-      >
-        {artists.map((artist) => (
-          <ArtistCard
-            key={artist.id}
-            artist={artist}
-            onPress={() => onPress(artist)}
-          />
-        ))}
-      </ScrollView>
+        initialNumToRender={5}
+        maxToRenderPerBatch={8}
+        windowSize={5}
+        removeClippedSubviews
+        renderItem={({ item: artist }) => (
+          <ArtistCard artist={artist} onPress={() => onPress(artist)} />
+        )}
+      />
     </View>
   );
 }
@@ -267,7 +295,7 @@ function RequestButton({
 
 // ─── Search Result Row ────────────────────────────────────────────────────────
 
-function SearchResultRow({
+const SearchResultRow = memo(function SearchResultRow({
   result,
   isActive,
   onPress,
@@ -280,21 +308,25 @@ function SearchResultRow({
   onLongPress: () => void;
   onTrackRequested: (videoId: string, track: Track) => void;
 }) {
-  const isInDb = result.inDatabase;
-  const artistName = isInDb ? result.track?.artist.name : result.channelTitle;
+  // A result is playable if it's in the DB (covers both DB-only results with
+  // empty videoId and YouTube results that have already been imported)
+  const isPlayable = result.inDatabase;
+
+  // Only show the YouTube badge for non-DB results that actually came from YT
+  const isYouTubeOnly = !result.inDatabase && result.videoId !== "";
 
   return (
     <TouchableOpacity
-      onPress={isInDb ? onPress : undefined}
-      onLongPress={isInDb ? onLongPress : undefined}
+      onPress={isPlayable ? onPress : undefined}
+      onLongPress={isPlayable ? onLongPress : undefined}
       delayLongPress={350}
-      activeOpacity={isInDb ? 0.7 : 1}
+      activeOpacity={isPlayable ? 0.7 : 1}
       style={{
         flexDirection: "row",
         alignItems: "center",
         paddingVertical: 10,
         paddingHorizontal: 4,
-        opacity: isInDb ? 1 : 0.85,
+        opacity: isPlayable ? 1 : 0.85,
       }}
     >
       {result.thumbnailUrl ? (
@@ -337,7 +369,7 @@ function SearchResultRow({
           {result.title}
         </Text>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-          {!isInDb && (
+          {isYouTubeOnly && (
             <View
               style={{
                 backgroundColor: "#2A2A2A",
@@ -351,14 +383,11 @@ function SearchResultRow({
               </Text>
             </View>
           )}
-          <Text style={{ color: "#B3B3B3", fontSize: 12 }} numberOfLines={1}>
-            {artistName}
-          </Text>
         </View>
       </View>
 
       <View style={{ alignItems: "flex-end" }}>
-        {isInDb ? (
+        {isPlayable ? (
           <View style={{ alignItems: "center" }}>
             {isActive && (
               <Ionicons
@@ -373,15 +402,18 @@ function SearchResultRow({
             </Text>
           </View>
         ) : (
-          <RequestButton
-            videoId={result.videoId}
-            onRequested={(track) => onTrackRequested(result.videoId, track)}
-          />
+          // Only show RequestButton for real YouTube results (non-empty videoId)
+          result.videoId !== "" && (
+            <RequestButton
+              videoId={result.videoId}
+              onRequested={(track) => onTrackRequested(result.videoId, track)}
+            />
+          )
         )}
       </View>
     </TouchableOpacity>
   );
-}
+});
 
 // ─── History List ─────────────────────────────────────────────────────────────
 
@@ -390,16 +422,18 @@ function SearchHistory({
   onSelect,
   onRemove,
   onClearAll,
+  bottomPadding,
 }: {
   history: string[];
   onSelect: (query: string) => void;
   onRemove: (query: string) => void;
   onClearAll: () => void;
+  bottomPadding: number;
 }) {
   if (history.length === 0) return null;
 
   return (
-    <View style={{ paddingHorizontal: 16, paddingTop: 8 }}>
+    <View style={{ flex: 1, paddingHorizontal: 16, paddingTop: 8 }}>
       <View
         style={{
           flexDirection: "row",
@@ -417,51 +451,55 @@ function SearchHistory({
           </Text>
         </TouchableOpacity>
       </View>
-      {history.map((item) => (
-        <View
-          key={item}
-          style={{
-            flexDirection: "row",
-            alignItems: "center",
-            paddingVertical: 10,
-          }}
-        >
-          <TouchableOpacity
-            onPress={() => onSelect(item)}
+      <FlatList
+        data={history}
+        keyExtractor={(item) => item}
+        contentContainerStyle={{ paddingBottom: bottomPadding }}
+        renderItem={({ item }) => (
+          <View
             style={{
-              flex: 1,
               flexDirection: "row",
               alignItems: "center",
-              gap: 12,
+              paddingVertical: 10,
             }}
           >
-            <Ionicons name="time-outline" size={18} color="#555" />
-            <Text
-              style={{ color: "#E5E5E5", fontSize: 14, flex: 1 }}
-              numberOfLines={1}
+            <TouchableOpacity
+              onPress={() => onSelect(item)}
+              style={{
+                flex: 1,
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 12,
+              }}
             >
-              {item}
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity onPress={() => onRemove(item)} hitSlop={8}>
-            <Ionicons name="close" size={18} color="#555" />
-          </TouchableOpacity>
-        </View>
-      ))}
+              <Ionicons name="time-outline" size={18} color="#555" />
+              <Text
+                style={{ color: "#E5E5E5", fontSize: 14, flex: 1 }}
+                numberOfLines={1}
+              >
+                {item}
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => onRemove(item)} hitSlop={8}>
+              <Ionicons name="close" size={18} color="#555" />
+            </TouchableOpacity>
+          </View>
+        )}
+      />
     </View>
   );
 }
 
 // ─── Empty / Idle States ──────────────────────────────────────────────────────
 
-function IdleState() {
+function IdleState({ bottomPadding }: { bottomPadding: number }) {
   return (
     <View
       style={{
         flex: 1,
         alignItems: "center",
         justifyContent: "center",
-        paddingBottom: 80,
+        paddingBottom: bottomPadding,
       }}
     >
       <Ionicons name="search" size={48} color="#333" />
@@ -490,14 +528,20 @@ function IdleState() {
   );
 }
 
-function EmptyState({ query }: { query: string }) {
+function EmptyState({
+  query,
+  bottomPadding,
+}: {
+  query: string;
+  bottomPadding: number;
+}) {
   return (
     <View
       style={{
         flex: 1,
         alignItems: "center",
         justifyContent: "center",
-        paddingBottom: 80,
+        paddingBottom: bottomPadding,
       }}
     >
       <Ionicons name="musical-notes-outline" size={48} color="#333" />
@@ -509,7 +553,7 @@ function EmptyState({ query }: { query: string }) {
           marginTop: 16,
         }}
       >
-        No results for "{query}"
+        No results for &quot;{query}&quot;
       </Text>
       <Text style={{ color: "#555", fontSize: 13, marginTop: 6 }}>
         Try a different search term
@@ -522,7 +566,8 @@ function EmptyState({ query }: { query: string }) {
 
 export default function SearchScreen() {
   const router = useRouter();
-  const { loadAndPlay, currentTrack, addToQueue, addToQueueNext } = usePlayer();
+  const { loadAndPlay, currentTrack, addToQueue, addToQueueNext } =
+    usePlayerControls();
 
   const [query, setQuery] = useState("");
   const [artists, setArtists] = useState<ArtistResult[]>([]);
@@ -530,6 +575,7 @@ export default function SearchScreen() {
   const [isSearching, setIsSearching] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hasSearched, setHasSearched] = useState(false);
+  const [youtubeAvailable, setYoutubeAvailable] = useState(true);
 
   const [likedIds, setLikedIds] = useState<Set<string>>(new Set());
 
@@ -540,6 +586,7 @@ export default function SearchScreen() {
 
   const [playlistTrackId, setPlaylistTrackId] = useState<string | null>(null);
   const [playlistModalVisible, setPlaylistModalVisible] = useState(false);
+  const bottomContentPadding = useBottomOverlaySpacing(24);
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inputRef = useRef<TextInput>(null);
@@ -557,6 +604,7 @@ export default function SearchScreen() {
       setArtists([]);
       setHasSearched(false);
       setError(null);
+      setYoutubeAvailable(true);
       return;
     }
 
@@ -568,6 +616,7 @@ export default function SearchScreen() {
       const data = await SearchService.searchYouTube(trimmed);
       setArtists(data.artists);
       setResults(data.results);
+      setYoutubeAvailable(data.youtubeAvailable);
       setLikedIds((prev) => {
         const next = new Set(prev);
         data.results.forEach((r: YouTubeSearchResult) => {
@@ -581,6 +630,7 @@ export default function SearchScreen() {
       setError(err?.message ?? "Search failed. Please try again.");
       setResults([]);
       setArtists([]);
+      setYoutubeAvailable(false);
     } finally {
       setIsSearching(false);
     }
@@ -603,6 +653,7 @@ export default function SearchScreen() {
     setArtists([]);
     setHasSearched(false);
     setError(null);
+    setYoutubeAvailable(true);
     if (debounceRef.current) clearTimeout(debounceRef.current);
   }, []);
 
@@ -656,7 +707,6 @@ export default function SearchScreen() {
               inDatabase: true,
               track,
               title: track.title,
-              channelTitle: track.artist.name,
               thumbnailUrl: track.coverUrl ?? r.thumbnailUrl,
               duration: track.duration,
             }
@@ -672,17 +722,27 @@ export default function SearchScreen() {
       const wasLiked = likedIds.has(track.id);
       setLikedIds((prev) => {
         const next = new Set(prev);
-        wasLiked ? next.delete(track.id) : next.add(track.id);
+        if (wasLiked) {
+          next.delete(track.id);
+        } else {
+          next.add(track.id);
+        }
         return next;
       });
       try {
-        wasLiked
-          ? await TracksService.unlike(track.id)
-          : await TracksService.like(track.id);
+        if (wasLiked) {
+          await TracksService.unlike(track.id);
+        } else {
+          await TracksService.like(track.id);
+        }
       } catch {
         setLikedIds((prev) => {
           const next = new Set(prev);
-          wasLiked ? next.add(track.id) : next.delete(track.id);
+          if (wasLiked) {
+            next.add(track.id);
+          } else {
+            next.delete(track.id);
+          }
           return next;
         });
       }
@@ -737,8 +797,16 @@ export default function SearchScreen() {
         <SearchResultRow
           result={item}
           isActive={isActive}
-          onPress={() => item.track && handleTrackPress(item.track)}
-          onLongPress={() => item.track && handleLongPress(item.track)}
+          onPress={() => {
+            if (item.track) {
+              void handleTrackPress(item.track);
+            }
+          }}
+          onLongPress={() => {
+            if (item.track) {
+              handleLongPress(item.track);
+            }
+          }}
           onTrackRequested={handleTrackRequested}
         />
       );
@@ -747,7 +815,8 @@ export default function SearchScreen() {
   );
 
   const keyExtractor = useCallback(
-    (item: YouTubeSearchResult) => item.videoId,
+    (item: YouTubeSearchResult, index: number) =>
+      item.videoId !== "" ? item.videoId : `db-${item.track?.id ?? index}`,
     [],
   );
 
@@ -822,6 +891,11 @@ export default function SearchScreen() {
         </View>
       </View>
 
+      {/* YouTube unavailable banner */}
+      {hasSearched && !isSearching && !youtubeAvailable && (
+        <YouTubeUnavailableBanner />
+      )}
+
       {/* Results count + legend */}
       {hasSearched && !isSearching && results.length > 0 && (
         <View
@@ -876,7 +950,7 @@ export default function SearchScreen() {
             flex: 1,
             alignItems: "center",
             justifyContent: "center",
-            paddingBottom: 80,
+            paddingBottom: bottomContentPadding,
           }}
         >
           <ActivityIndicator size="large" color="#1DB954" />
@@ -922,14 +996,19 @@ export default function SearchScreen() {
           onSelect={handleHistorySelect}
           onRemove={handleHistoryRemove}
           onClearAll={handleClearAll}
+          bottomPadding={bottomContentPadding}
         />
       )}
 
       {/* Idle state */}
-      {showIdle && !isSearching && !showHistory && <IdleState />}
+      {showIdle && !isSearching && !showHistory && (
+        <IdleState bottomPadding={bottomContentPadding} />
+      )}
 
       {/* Empty state */}
-      {showEmpty && <EmptyState query={query} />}
+      {showEmpty && (
+        <EmptyState query={query} bottomPadding={bottomContentPadding} />
+      )}
 
       {/* Results: artists + tracks */}
       {!isSearching && (artists.length > 0 || results.length > 0) && (
@@ -937,10 +1016,13 @@ export default function SearchScreen() {
           data={results}
           keyExtractor={keyExtractor}
           renderItem={renderItem}
+          initialNumToRender={12}
+          maxToRenderPerBatch={16}
+          windowSize={10}
+          removeClippedSubviews
           ListHeaderComponent={
             <ArtistSection artists={artists} onPress={handleArtistPress} />
           }
-          contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 120 }}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
           ItemSeparatorComponent={() => (
@@ -952,6 +1034,10 @@ export default function SearchScreen() {
               }}
             />
           )}
+          contentContainerStyle={{
+            paddingHorizontal: 16,
+            paddingBottom: bottomContentPadding,
+          }}
         />
       )}
 

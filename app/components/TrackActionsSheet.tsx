@@ -11,6 +11,7 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { Track } from "../services/tracks.service";
 import { useOffline } from "../context/OfflineContext";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 type Props = {
   track: Track | null;
@@ -42,6 +43,7 @@ export default function TrackActionsSheet({
   onAddToQueue,
   onAddToPlaylist,
 }: Props) {
+  const insets = useSafeAreaInsets();
   const translateY = useRef(new Animated.Value(600)).current;
   const backdropOpacity = useRef(new Animated.Value(0)).current;
   const [mounted, setMounted] = useState(false);
@@ -191,7 +193,8 @@ export default function TrackActionsSheet({
           backgroundColor: "#1A1A1A",
           borderTopLeftRadius: 20,
           borderTopRightRadius: 20,
-          paddingBottom: 36,
+          paddingBottom: insets.bottom + 16,
+          maxHeight: "85%",
           transform: [{ translateY }],
         }}
       >

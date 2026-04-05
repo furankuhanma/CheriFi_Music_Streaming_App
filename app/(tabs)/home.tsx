@@ -1,19 +1,19 @@
 // CheriFi/app/(tabs)/home.tsx
 
-import { useEffect, useState, useCallback } from "react";
+import { memo, useEffect, useState, useCallback } from "react";
 import {
+  FlatList,
   ScrollView,
   Text,
   View,
   TouchableOpacity,
   Image,
-  Dimensions,
   RefreshControl,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import { usePlayer } from "../context/PlayerContext";
+import { usePlayerControls } from "../context/PlayerContext";
 import {
   RecommendationsService,
   HomeFeedSection,
@@ -27,8 +27,8 @@ import { PlaylistsService, Playlist } from "../services/playlists.api";
 import PlaylistCover from "../components/PlaylistCover";
 import AddToPlaylistModal from "../components/AddToPlaylistModal";
 import TrackActionsSheet from "../components/TrackActionsSheet";
+import { useBottomOverlaySpacing } from "../hooks/useBottomOverlaySpacing";
 
-const SCREEN_WIDTH = Dimensions.get("window").width;
 const CARD_WIDTH = 140;
 const ARTIST_CARD_WIDTH = 110;
 
@@ -117,7 +117,7 @@ function SkeletonFeed() {
 
 // ─── Track card (large horizontal) ───────────────────────────────────────────
 
-function TrackCard({
+const TrackCard = memo(function TrackCard({
   track,
   isActive,
   onPress,
@@ -192,11 +192,11 @@ function TrackCard({
       )}
     </TouchableOpacity>
   );
-}
+});
 
 // ─── Track row (small vertical) ───────────────────────────────────────────────
 
-function TrackRow({
+const TrackRow = memo(function TrackRow({
   track,
   isActive,
   onPress,
@@ -254,11 +254,11 @@ function TrackRow({
       </Text>
     </TouchableOpacity>
   );
-}
+});
 
 // ─── Album card ───────────────────────────────────────────────────────────────
 
-function AlbumCard({
+const AlbumCard = memo(function AlbumCard({
   album,
   onPress,
 }: {
@@ -319,11 +319,11 @@ function AlbumCard({
       </Text>
     </TouchableOpacity>
   );
-}
+});
 
 // ─── Artist card ──────────────────────────────────────────────────────────────
 
-function ArtistCard({
+const ArtistCard = memo(function ArtistCard({
   artist,
   onPress,
 }: {
@@ -392,11 +392,11 @@ function ArtistCard({
       </Text>
     </TouchableOpacity>
   );
-}
+});
 
 // ─── Public playlist card ─────────────────────────────────────────────────────
 
-function PublicPlaylistCard({
+const PublicPlaylistCard = memo(function PublicPlaylistCard({
   playlist,
   onPress,
 }: {
@@ -457,14 +457,18 @@ function PublicPlaylistCard({
       </Text>
     </TouchableOpacity>
   );
-}
+});
 
 // ─── Section header ───────────────────────────────────────────────────────────
 // Centralised so future "See all" buttons only need adding in one place.
 
-function SectionHeader({ title }: { title: string }) {
+const SectionHeader = memo(function SectionHeader({
+  title,
+}: {
+  title: string;
+}) {
   return <Text className="text-white text-xl font-bold mb-4">{title}</Text>;
-}
+});
 
 // ─── Section renderers ────────────────────────────────────────────────────────
 
@@ -482,21 +486,25 @@ function TrackLargeSection({
   return (
     <View className="mb-8">
       <SectionHeader title={section.title} />
-      <ScrollView
+      <FlatList
+        data={section.tracks}
         horizontal
+        keyExtractor={(item) => item.id}
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={{ paddingRight: 16 }}
-      >
-        {section.tracks.map((track) => (
+        initialNumToRender={4}
+        maxToRenderPerBatch={6}
+        windowSize={5}
+        removeClippedSubviews
+        renderItem={({ item: track }) => (
           <TrackCard
-            key={track.id}
             track={track}
             isActive={track.id === currentTrackId}
             onPress={() => onTrackPress(track)}
             onLongPress={() => onTrackLongPress(track)}
           />
-        ))}
-      </ScrollView>
+        )}
+      />
     </View>
   );
 }
@@ -533,14 +541,18 @@ function AlbumSection({ section }: { section: HomeFeedAlbumSection }) {
   return (
     <View className="mb-8">
       <SectionHeader title={section.title} />
-      <ScrollView
+      <FlatList
+        data={section.albums}
         horizontal
+        keyExtractor={(item) => item.id}
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={{ paddingRight: 16 }}
-      >
-        {section.albums.map((album) => (
+        initialNumToRender={4}
+        maxToRenderPerBatch={6}
+        windowSize={5}
+        removeClippedSubviews
+        renderItem={({ item: album }) => (
           <AlbumCard
-            key={album.id}
             album={album}
             onPress={() =>
               router.push({
@@ -555,8 +567,8 @@ function AlbumSection({ section }: { section: HomeFeedAlbumSection }) {
               })
             }
           />
-        ))}
-      </ScrollView>
+        )}
+      />
     </View>
   );
 }
@@ -566,14 +578,18 @@ function ArtistSection({ section }: { section: HomeFeedArtistSection }) {
   return (
     <View className="mb-8">
       <SectionHeader title={section.title} />
-      <ScrollView
+      <FlatList
+        data={section.artists}
         horizontal
+        keyExtractor={(item) => item.id}
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={{ paddingRight: 16 }}
-      >
-        {section.artists.map((artist) => (
+        initialNumToRender={4}
+        maxToRenderPerBatch={6}
+        windowSize={5}
+        removeClippedSubviews
+        renderItem={({ item: artist }) => (
           <ArtistCard
-            key={artist.id}
             artist={artist}
             onPress={() =>
               router.push({
@@ -587,8 +603,8 @@ function ArtistSection({ section }: { section: HomeFeedArtistSection }) {
               })
             }
           />
-        ))}
-      </ScrollView>
+        )}
+      />
     </View>
   );
 }
@@ -598,14 +614,18 @@ function PlaylistSection({ section }: { section: HomeFeedPlaylistSection }) {
   return (
     <View className="mb-8">
       <SectionHeader title={section.title} />
-      <ScrollView
+      <FlatList
+        data={section.playlists}
         horizontal
+        keyExtractor={(item) => item.id}
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={{ paddingRight: 16 }}
-      >
-        {section.playlists.map((playlist) => (
+        initialNumToRender={4}
+        maxToRenderPerBatch={6}
+        windowSize={5}
+        removeClippedSubviews
+        renderItem={({ item: playlist }) => (
           <PublicPlaylistCard
-            key={playlist.id}
             playlist={playlist}
             onPress={() =>
               router.push({
@@ -620,8 +640,8 @@ function PlaylistSection({ section }: { section: HomeFeedPlaylistSection }) {
               })
             }
           />
-        ))}
-      </ScrollView>
+        )}
+      />
     </View>
   );
 }
@@ -675,8 +695,8 @@ function FeedSection({
 
 export default function HomeScreen() {
   const router = useRouter();
-  const { playTrack, currentTrack, addToQueue, addToQueueNext, toggleLike } =
-    usePlayer();
+  const { playTrack, currentTrack, addToQueue, addToQueueNext } =
+    usePlayerControls();
 
   const [feedSections, setFeedSections] = useState<HomeFeedSection[]>([]);
   const [feedLoading, setFeedLoading] = useState(true);
@@ -691,6 +711,7 @@ export default function HomeScreen() {
   const [playlistTrackId, setPlaylistTrackId] = useState<string | null>(null);
   const [playlistModalVisible, setPlaylistModalVisible] = useState(false);
   const [likedIds, setLikedIds] = useState<Set<string>>(new Set());
+  const bottomContentPadding = useBottomOverlaySpacing(24);
 
   // ── Loaders ──────────────────────────────────────────────────────────────────
 
@@ -742,7 +763,7 @@ export default function HomeScreen() {
 
   useEffect(() => {
     loadAll(false);
-  }, []);
+  }, [loadAll]);
 
   // ── Pull-to-refresh — always bypasses cache ───────────────────────────────────
 
@@ -765,7 +786,11 @@ export default function HomeScreen() {
       const wasLiked = likedIds.has(track.id);
       setLikedIds((prev) => {
         const next = new Set(prev);
-        wasLiked ? next.delete(track.id) : next.add(track.id);
+        if (wasLiked) {
+          next.delete(track.id);
+        } else {
+          next.add(track.id);
+        }
         return next;
       });
       try {
@@ -777,7 +802,11 @@ export default function HomeScreen() {
       } catch {
         setLikedIds((prev) => {
           const next = new Set(prev);
-          wasLiked ? next.add(track.id) : next.delete(track.id);
+          if (wasLiked) {
+            next.add(track.id);
+          } else {
+            next.delete(track.id);
+          }
           return next;
         });
       }
@@ -791,6 +820,7 @@ export default function HomeScreen() {
     <SafeAreaView className="flex-1 bg-[#121212]">
       <ScrollView
         className="px-4 pt-6"
+        contentContainerStyle={{ paddingBottom: bottomContentPadding }}
         showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl
@@ -850,7 +880,7 @@ export default function HomeScreen() {
           <View className="flex-row items-center bg-[#1E1E1E] rounded-lg p-3 mb-8">
             <Ionicons name="warning-outline" size={16} color="#FF4444" />
             <Text className="text-[#FF4444] text-sm flex-1 ml-2">
-              Couldn't load your feed.
+              Couldn&apos;t load your feed.
             </Text>
             <TouchableOpacity onPress={() => loadAll(true)}>
               <Text className="text-[#1DB954] text-sm font-semibold">
@@ -872,8 +902,6 @@ export default function HomeScreen() {
               onTrackLongPress={handleLongPress}
             />
           ))}
-
-        <View style={{ height: 100 }} />
       </ScrollView>
 
       {/* Track action sheet */}

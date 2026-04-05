@@ -7,8 +7,8 @@ import Animated, {
   withTiming,
   runOnJS,
 } from "react-native-reanimated";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useDownload, DownloadNotification } from "../context/DownloadContext";
+import { useBottomOverlaySpacing } from "../hooks/useBottomOverlaySpacing";
 
 /**
  * Bottom snackbar/toast notification for download initiation
@@ -18,7 +18,7 @@ import { useDownload, DownloadNotification } from "../context/DownloadContext";
  */
 export function DownloadNotificationBar() {
   const { notifications, removeNotification } = useDownload();
-  const insets = useSafeAreaInsets();
+  const bottomOffset = useBottomOverlaySpacing(12);
 
   // Show the first notification in the queue
   const currentNotification = notifications[0];
@@ -28,7 +28,7 @@ export function DownloadNotificationBar() {
       {currentNotification && (
         <NotificationItem
           notification={currentNotification}
-          bottomOffset={insets.bottom}
+          bottomOffset={bottomOffset}
           onDismiss={() => removeNotification(currentNotification.id)}
         />
       )}
@@ -94,7 +94,7 @@ function NotificationItem({
       style={[
         {
           position: "absolute",
-          bottom: bottomOffset + 16,
+          bottom: bottomOffset,
           left: 16,
           right: 16,
           zIndex: 1000,

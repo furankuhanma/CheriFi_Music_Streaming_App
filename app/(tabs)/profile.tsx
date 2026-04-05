@@ -10,10 +10,12 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "../context/AuthContext";
 import { useRouter } from "expo-router";
+import { useBottomOverlaySpacing } from "../hooks/useBottomOverlaySpacing";
 
 export default function ProfileScreen() {
   const { user, logout } = useAuth();
   const router = useRouter();
+  const bottomContentPadding = useBottomOverlaySpacing(16);
 
   const handleLogout = () => {
     Alert.alert("Log out", "Are you sure you want to log out?", [
@@ -28,8 +30,6 @@ export default function ProfileScreen() {
       },
     ]);
   };
-
-  console.log("PROFILE USER:", JSON.stringify(user, null, 2));
 
   // Prioritize: displayName → username → email → "Your Name"
   const displayName =
@@ -47,7 +47,11 @@ export default function ProfileScreen() {
 
   return (
     <SafeAreaView className="flex-1 bg-[#121212]">
-      <ScrollView className="px-4 pt-6" showsVerticalScrollIndicator={false}>
+      <ScrollView
+        className="px-4 pt-6"
+        contentContainerStyle={{ paddingBottom: bottomContentPadding }}
+        showsVerticalScrollIndicator={false}
+      >
         <Text className="text-white text-2xl font-bold mb-6">Profile</Text>
 
         {/* ── Avatar + Name ── */}
@@ -119,8 +123,6 @@ export default function ProfileScreen() {
             </TouchableOpacity>
           </View>
         </View>
-
-        <View style={{ height: 80 }} />
       </ScrollView>
     </SafeAreaView>
   );

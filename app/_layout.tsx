@@ -6,6 +6,7 @@ import { PlayerProvider } from "./context/PlayerContext";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import { OfflineProvider } from "./context/OfflineContext";
 import { DownloadProvider } from "./context/DownloadContext";
+import { LocalTracksProvider } from "./context/LocalTracksContext";
 import { DownloadNotificationBar } from "./components/DownloadNotificationBar";
 import { useDownloadIntegration } from "./hooks/useDownloadIntegration";
 import { useEffect } from "react";
@@ -76,14 +77,16 @@ export default function RootLayout() {
       <AuthProvider>
         <OfflineProvider>
           <DownloadProvider>
-            <PlayerProvider>
-              <SafeAreaProvider>
-                <View style={{ flex: 1 }}>
-                  <RouteGuard />
-                  <DownloadNotificationWrapper />
-                </View>
-              </SafeAreaProvider>
-            </PlayerProvider>
+            <LocalTracksProvider>
+              <PlayerProvider>
+                <SafeAreaProvider>
+                  <View style={{ flex: 1 }}>
+                    <RouteGuard />
+                    <DownloadNotificationWrapper />
+                  </View>
+                </SafeAreaProvider>
+              </PlayerProvider>
+            </LocalTracksProvider>
           </DownloadProvider>
         </OfflineProvider>
       </AuthProvider>

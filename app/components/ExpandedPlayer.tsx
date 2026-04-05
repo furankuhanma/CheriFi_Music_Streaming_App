@@ -772,7 +772,7 @@ export default function ExpandedPlayer() {
             borderRadius: 12,
             padding: 16,
             marginHorizontal: 16,
-            marginBottom: 40,
+            marginBottom: insets.bottom + 20,
           }}
         >
           <Text

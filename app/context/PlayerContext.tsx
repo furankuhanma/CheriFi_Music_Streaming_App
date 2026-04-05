@@ -19,6 +19,7 @@ import React, {
   useEffect,
   useRef,
   useCallback,
+  useMemo,
   ReactNode,
 } from "react";
 import { AppState, Dimensions } from "react-native";
@@ -115,14 +116,36 @@ type PlayerContextType = {
   loadAndPlay: (tracks: Track[], startIndex: number) => Promise<void>;
 };
 
+type PlayerControlsContextType = Omit<
+  PlayerContextType,
+  "isPlaying" | "isLoading" | "playbackPosition" | "duration"
+>;
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-/** Map our app Track → RNTP AddTrack (all playback metadata for the notification). */
+/**
+ * Map our app Track → RNTP AddTrack.
+ *
+ * For local tracks the ID is "local:" + the full file:// URI (e.g.
+ * "local:file:///data/user/0/.../local_music/song.mp3").
+ * We store that same URI in audioUrl, so we just use audioUrl directly —
+ * no string manipulation needed and no double-wrapping of the scheme.
+ */
 async function toRNTPTrack(track: Track): Promise<AddTrack> {
-  const localUri = await OfflineService.resolvePlayableUri(track.id);
+  let url: string;
+
+  if (track.id.startsWith("local:")) {
+    // audioUrl already holds the correct file:// URI set by LocalTracksService.
+    url = track.audioUrl;
+  } else {
+    // Fall back to resolving via OfflineService or streaming.
+    const localUri = await OfflineService.resolvePlayableUri(track.id);
+    url = localUri ?? TracksService.streamUrl(track.id);
+  }
+
   return {
     id: track.id,
-    url: localUri ?? TracksService.streamUrl(track.id),
+    url,
     title: track.title,
     artist: track.artist.name,
     artwork: track.coverUrl ?? undefined,
@@ -249,6 +272,9 @@ async function loadPlayerState(): Promise<RestoredState> {
 // ─── Context ──────────────────────────────────────────────────────────────────
 
 const PlayerContext = createContext<PlayerContextType | null>(null);
+const PlayerControlsContext = createContext<PlayerControlsContextType | null>(
+  null,
+);
 
 export function PlayerProvider({ children }: { children: ReactNode }) {
   // ── Refs ──────────────────────────────────────────────────────────────────
@@ -264,8 +290,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const isCollectionQueueRef = useRef(false);
 
   // Mirrors the latest RNTP position (seconds) without causing re-renders.
-  // Used by the persist effect so playbackPosition is NOT a dependency there,
-  // preventing the "Maximum update depth exceeded" loop during downloads.
   const positionRef = useRef(0);
 
   // ── State ─────────────────────────────────────────────────────────────────
@@ -281,7 +305,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   // ── RNTP progress ─────────────────────────────────────────────────────────
   const { position, duration: rnDuration } = useProgress(200);
 
-  // Keep positionRef in sync every tick without adding position to persist deps
   useEffect(() => {
     positionRef.current = position;
   }, [position]);
@@ -359,11 +382,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   }, [currentTrack?.id]);
 
   // ── Persist state (debounced 2s) ──────────────────────────────────────────
-  // FIX: playbackPosition is intentionally NOT in the dependency array.
-  // It updates every 200 ms via useProgress, which caused this effect to
-  // fire constantly and trigger "Maximum update depth exceeded" during
-  // downloads. We read the latest position from positionRef.current instead,
-  // which is kept in sync via a separate lightweight effect above.
   useEffect(() => {
     if (!isInitialized || queue.length === 0) return;
 
@@ -373,7 +391,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       savePlayerState(
         queue,
         currentIndexRef.current,
-        positionRef.current * 1000, // seconds → ms, read from ref not state
+        positionRef.current * 1000,
         isShuffle,
         repeatMode,
       );
@@ -388,7 +406,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   // ── Queue health: auto-refill when running low ────────────────────────────
   const ensureQueueHealth = useCallback(async () => {
     if (isRefillInProgressRef.current) return;
-    // Never refill a collection queue — it must stay exactly as loaded
     if (isCollectionQueueRef.current) return;
 
     const q = queueRef.current;
@@ -445,7 +462,10 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
           const next = q[index];
           if (next) {
             setCurrentTrack(next);
-            TracksService.recordPlay(next.id);
+            // Only record plays for server tracks, not local files
+            if (!next.id.startsWith("local:")) {
+              TracksService.recordPlay(next.id);
+            }
           }
         }
 
@@ -462,7 +482,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const fetchQueue = useCallback(async () => {
     try {
       setPlaybackError(null);
-      // Leaving recommendation mode — clear the collection lock
       isCollectionQueueRef.current = false;
       const tracks = await RecommendationsService.smart(20);
 
@@ -657,7 +676,9 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     await TrackPlayer.skip(nextIndex);
     await TrackPlayer.play();
     setLiveState(State.Playing);
-    TracksService.recordPlay(q[nextIndex].id);
+    if (!q[nextIndex].id.startsWith("local:")) {
+      TracksService.recordPlay(q[nextIndex].id);
+    }
     void ensureQueueHealth();
   }, [ensureQueueHealth]);
 
@@ -677,34 +698,38 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     await TrackPlayer.skip(prevIndex);
     await TrackPlayer.play();
     setLiveState(State.Playing);
-    TracksService.recordPlay(q[prevIndex].id);
+    if (!q[prevIndex].id.startsWith("local:")) {
+      TracksService.recordPlay(q[prevIndex].id);
+    }
   }, [position]);
 
   // ── playTrack ─────────────────────────────────────────────────────────────
 
   const playTrack = useCallback(
     async (track: Track) => {
-      // Tapping a track from home/library exits collection mode
       isCollectionQueueRef.current = false;
 
-      try {
-        const localUri = await OfflineService.resolvePlayableUri(track.id);
-        let canReach = true;
-        if (!localUri) {
-          try {
-            canReach = await canReachBackend(track.id);
-          } catch {
-            canReach = false;
+      // Local tracks are always playable — skip the network check entirely.
+      if (!track.id.startsWith("local:")) {
+        try {
+          const localUri = await OfflineService.resolvePlayableUri(track.id);
+          let canReach = true;
+          if (!localUri) {
+            try {
+              canReach = await canReachBackend(track.id);
+            } catch {
+              canReach = false;
+            }
           }
-        }
-        if (!localUri && !canReach) {
-          setPlaybackError("network");
+          if (!localUri && !canReach) {
+            setPlaybackError("network");
+            return;
+          }
+        } catch (error) {
+          console.error("[PlayerContext] Error checking offline state:", error);
+          setPlaybackError("load_failed");
           return;
         }
-      } catch (error) {
-        console.error("[PlayerContext] Error checking offline state:", error);
-        setPlaybackError("load_failed");
-        return;
       }
 
       let q = queueRef.current;
@@ -725,7 +750,9 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       await TrackPlayer.skip(idx);
       await TrackPlayer.play();
       setLiveState(State.Playing);
-      TracksService.recordPlay(track.id);
+      if (!track.id.startsWith("local:")) {
+        TracksService.recordPlay(track.id);
+      }
 
       void ensureQueueHealth();
     },
@@ -823,15 +850,12 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   }, []);
 
   // ── loadAndPlay: replace queue with a collection and start playing ─────────
-  // Sets isCollectionQueueRef = true so ensureQueueHealth never appends
-  // random tracks to an album / artist / playlist queue.
 
   const loadAndPlay = useCallback(
     async (tracks: Track[], startIndex: number) => {
       if (tracks.length === 0) return;
       const safeIndex = Math.max(0, Math.min(startIndex, tracks.length - 1));
 
-      // Lock the queue — no auto-refill while playing a collection
       isCollectionQueueRef.current = true;
 
       queueRef.current = tracks;
@@ -843,7 +867,9 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       await TrackPlayer.skip(safeIndex);
       await TrackPlayer.play();
       setLiveState(State.Playing);
-      TracksService.recordPlay(tracks[safeIndex].id);
+      if (!tracks[safeIndex].id.startsWith("local:")) {
+        TracksService.recordPlay(tracks[safeIndex].id);
+      }
     },
     [],
   );
@@ -864,7 +890,9 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         TrackPlayer.setQueue(rntpQueue).then(async () => {
           await TrackPlayer.play();
           setLiveState(State.Playing);
-          TracksService.recordPlay(newQueue[0].id);
+          if (!newQueue[0].id.startsWith("local:")) {
+            TracksService.recordPlay(newQueue[0].id);
+          }
           void ensureQueueHealth();
         }),
       );
@@ -876,6 +904,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
   const toggleLike = useCallback(async () => {
     if (!currentTrack) return;
+    // Local tracks cannot be liked via the server API.
+    if (currentTrack.id.startsWith("local:")) return;
     const prev = isLiked;
     setIsLiked(!prev);
     try {
@@ -889,44 +919,83 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     }
   }, [currentTrack, isLiked]);
 
+  const controlsValue = useMemo<PlayerControlsContextType>(
+    () => ({
+      isExpanded,
+      setIsExpanded,
+      currentTrack,
+      queue,
+      isInitialized,
+      playbackError,
+      retryLoad,
+      refetchQueue,
+      play,
+      pause,
+      togglePlay,
+      seekTo,
+      playNext,
+      playPrevious,
+      playTrack,
+      isShuffle,
+      toggleShuffle,
+      repeatMode,
+      cycleRepeat,
+      isLiked,
+      toggleLike,
+      addToQueue,
+      addToQueueNext,
+      removeFromQueue,
+      reorderQueue,
+      skipToTrack,
+      loadAndPlay,
+    }),
+    [
+      isExpanded,
+      currentTrack,
+      queue,
+      isInitialized,
+      playbackError,
+      retryLoad,
+      refetchQueue,
+      play,
+      pause,
+      togglePlay,
+      seekTo,
+      playNext,
+      playPrevious,
+      playTrack,
+      isShuffle,
+      toggleShuffle,
+      repeatMode,
+      cycleRepeat,
+      isLiked,
+      toggleLike,
+      addToQueue,
+      addToQueueNext,
+      removeFromQueue,
+      reorderQueue,
+      skipToTrack,
+      loadAndPlay,
+    ],
+  );
+
+  const fullValue = useMemo<PlayerContextType>(
+    () => ({
+      ...controlsValue,
+      isPlaying,
+      isLoading,
+      playbackPosition,
+      duration,
+    }),
+    [controlsValue, isPlaying, isLoading, playbackPosition, duration],
+  );
+
   return (
-    <PlayerContext.Provider
-      value={{
-        isExpanded,
-        setIsExpanded,
-        currentTrack,
-        queue,
-        isPlaying,
-        isLoading,
-        isInitialized,
-        playbackPosition,
-        duration,
-        playbackError,
-        retryLoad,
-        refetchQueue,
-        play,
-        pause,
-        togglePlay,
-        seekTo,
-        playNext,
-        playPrevious,
-        playTrack,
-        isShuffle,
-        toggleShuffle,
-        repeatMode,
-        cycleRepeat,
-        isLiked,
-        toggleLike,
-        addToQueue,
-        addToQueueNext,
-        removeFromQueue,
-        reorderQueue,
-        skipToTrack,
-        loadAndPlay,
-      }}
-    >
-      {children}
-    </PlayerContext.Provider>
+    <PlayerControlsContext.Provider value={controlsValue}>
+      <PlayerContext.Provider value={fullValue}>
+        {children}
+      </PlayerContext.Provider>
+    </PlayerControlsContext.Provider>
   );
 }
 
@@ -934,6 +1003,13 @@ export function usePlayer() {
   const context = useContext(PlayerContext);
   if (!context)
     throw new Error("usePlayer must be used within a PlayerProvider");
+  return context;
+}
+
+export function usePlayerControls() {
+  const context = useContext(PlayerControlsContext);
+  if (!context)
+    throw new Error("usePlayerControls must be used within a PlayerProvider");
   return context;
 }
 
