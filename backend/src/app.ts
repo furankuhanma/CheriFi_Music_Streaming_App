@@ -16,6 +16,10 @@ import searchRoutes from "./modules/search/search.routes";
 
 const app = express();
 
+// Required when running behind Cloudflare/Nginx/tunnels so rate limiting
+// uses the real client IP from X-Forwarded-For.
+app.set("trust proxy", 1);
+
 // ── Security ──────────────────────────────────────────────────────────────────
 app.use(helmet());
 
@@ -48,10 +52,12 @@ app.use(
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 200,
-  message: { success: false, error: "Too many requests, please try again later" },  skip: (req) => {
+  message: { success: false, error: "Too many requests, please try again later" },
+  skip: (req) => {
     // Don't rate limit health checks and static files
     return req.path === "/health" || req.path.startsWith("/uploads");
-  },});
+  },
+});
 
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
