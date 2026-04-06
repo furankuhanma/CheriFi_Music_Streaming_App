@@ -52,11 +52,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           return;
         }
 
-        // Skip session restore if token might be expired or invalid
-        // This prevents hitting rate limits on app startup
         const accessToken = await AuthStore.getAccessToken();
         if (!accessToken) {
           await AuthStore.clearTokens();
+          await AuthStore.clearUser();
           setIsLoadingAuth(false);
           return;
         }
@@ -66,20 +65,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         try {
           const me = await AuthService.me();
+          // Persist latest user data locally so we can restore it offline
+          await AuthStore.saveUser(me);
           setUser(me);
         } catch (err) {
-          // Only clear tokens on actual auth failures (401/403).
-          // Network errors (offline, timeout) should NOT log the user out —
-          // they still have valid tokens and should stay logged in.
           const isAuthError =
             err instanceof ApiError &&
             (err.status === 401 || err.status === 403);
+
           if (isAuthError) {
+            // Genuine auth failure — wipe everything and force re-login
             await AuthStore.clearTokens();
+            await AuthStore.clearUser();
+          } else {
+            // Network is down or server error — restore from local cache
+            // so the user can access the app offline without logging in again
+            const cachedUser = await AuthStore.getUser();
+            if (cachedUser) {
+              setUser(cachedUser);
+            }
+            // If no cached user yet (first ever launch offline), user stays
+            // null and will be redirected to login — expected behaviour.
           }
-          // For any other error (network down, timeout, 5xx), we silently
-          // keep the user's session intact. They will be shown cached/offline
-          // content and can retry when connectivity is restored.
         }
       } finally {
         setIsLoadingAuth(false);
@@ -94,6 +101,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setAuthError(null);
     try {
       const authedUser = await AuthService.login(email, password);
+      // Cache user so it's available on next offline launch
+      await AuthStore.saveUser(authedUser);
       setUser(authedUser);
     } catch (err) {
       setAuthError(extractMessage(err));
@@ -113,6 +122,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           username,
           password,
         );
+        // Cache user so it's available on next offline launch
+        await AuthStore.saveUser(authedUser);
         setUser(authedUser);
       } catch (err) {
         setAuthError(extractMessage(err));
@@ -136,6 +147,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Bust the feed cache so next login shows fresh content
       RecommendationsService.bustFeedCache();
     } finally {
+      // Clear cached user on explicit logout
+      await AuthStore.clearUser();
       setUser(null);
       setIsLoadingAuth(false);
     }
